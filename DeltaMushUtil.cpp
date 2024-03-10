@@ -94,8 +94,7 @@ namespace DMUtil
 				meshFn.getPolygonVertices(faceIdx, vertArray);
 
 				// この中から、隣接している2頂点のみ残して、ほかの要素を削除する
-				int numVertsInFace = vertArray.length();
-				for (int cvIdx = 0; cvIdx < numVertsInFace; )
+				for (int cvIdx = 0; cvIdx < vertArray.length(); )
 				{
 					bool found = false;
 					for (const int& connectedVert : connectedVerts)
@@ -122,7 +121,11 @@ namespace DMUtil
 
 				// それらの外積から法線を計算
 				MVector tmpNormal = ((smoothedPoints[vertArray[0]] - s) ^ (smoothedPoints[vertArray[1]] - s)).normal();
-				if (tmpNormal * normalBefore < 0.0f)
+
+				// 法線の方向を計算
+				MVector prevNormal;
+				meshFn.getFaceVertexNormal(faceIdx, itVertex.index(), prevNormal);
+				if (tmpNormal * prevNormal < 0.0f)
 				{
 					// NOTE: このやり方でうまくいかなかったら、MItMeshPolygon から Triangle を持ってくるか、
 					// smooth 前の法線から掛け算の順序を推定する感じになる
@@ -139,7 +142,7 @@ namespace DMUtil
 			t = (t - (t * n) * n).normal();
 
 			// binormal vector
-			MVector b = t ^ n;
+			MVector b = (t ^ n).normal();
 
 			// set value
 			double tmp[4][4];

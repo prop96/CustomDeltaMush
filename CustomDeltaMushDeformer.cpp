@@ -48,6 +48,9 @@ MStatus CustomDeltaMushDeformer::deform(MDataBlock& data, MItGeometry& iter, con
 	MPointArray deformed;
 	deformed.setLength(num);
 
+	MMatrixArray mats;
+	DMUtil::CreateDeltaMushMatrix(skinnedMesh, mats);
+
 	MItMeshVertex itVertex(skinnedMesh);
 	for (itVertex.reset(); !itVertex.isDone(); itVertex.next())
 	{
@@ -56,8 +59,8 @@ MStatus CustomDeltaMushDeformer::deform(MDataBlock& data, MItGeometry& iter, con
 		MMatrix inv = dmArrayHandle.inputValue(&returnStat).asMatrix().inverse();
 		CHECK_MSTATUS(returnStat);
 
-		MMatrix mat;
-		CHECK_MSTATUS(DMUtil::CreateDeltaMushMatrix(mat, itVertex, meshFn, skinnedPoints));
+		MMatrix mat = mats[itVertex.index()];
+		//CHECK_MSTATUS(DMUtil::CreateDeltaMushMatrix(mat, itVertex, meshFn, skinnedPoints));
 
 		MPoint pos = itVertex.position();
 		pos = pos * inv * mat;
