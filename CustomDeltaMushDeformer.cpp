@@ -257,40 +257,38 @@ MStatus CustomDeltaMushDeformer::initData(MObject& mesh, int iters)
 	return returnStat;
 }
 
-void CustomDeltaMushDeformer::averageRelax(MPointArray& source, MPointArray& target, int iter, double amountV)
+void CustomDeltaMushDeformer::averageRelax(const MPointArray& source, MPointArray& target, int smoothItr, double smoothAmount)
 {
-	// rescaling the target array if needed
-	int size = source.length();
-	CHECK_MSTATUS(target.setLength(size));
+	// set the length of the target array
+	const unsigned int numVertices = source.length();
+	target.setLength(numVertices);
 
-	// making a copy of the original
-	MPointArray copy;
-	CHECK_MSTATUS(copy.copy(source));
+	// copy the source array
+	MPointArray srcCopy;
+	CHECK_MSTATUS(srcCopy.copy(source));
 
-	MVector tmp;
-	int i, n, it;
 	// looping for how many smooth iterations we have
-	for (it = 0; it < iter; it++)
+	for (int itr = 0; itr < smoothItr; itr++)
 	{
-		// looping for the mesh size to smooth the given mesh
-		for (i = 0; i < size; i++)
+		// looping for all the vertices to smooth the given mesh
+		for (int vertIdx = 0; vertIdx < numVertices; vertIdx++)
 		{
-			// resetting the vector
-			tmp = MVector::zero;
-			// looping the neighbours
-			for (n = 0; n < dataPoints[i].size; n++)
+			const point_data& pointData = dataPoints[vertIdx];
+
+			// compute smoothed vertex position by looping the neighbours
+			MVector smoothedPos = MVector::zero;
+			for (const int neighbourVertIdx : pointData.neighbours)
 			{
-				tmp += copy[dataPoints[i].neighbours[n]];
+				smoothedPos += srcCopy[neighbourVertIdx];
 			}
+			smoothedPos /= double(pointData.size);
 
-			// perform the average
-			tmp /= double(dataPoints[i].size);
-
-			// scaling the final position by the amount the user has set
-			target[i] = copy[i] + (tmp - copy[i]) * amountV;
+			// compute the final position by blending the smoothed and original position
+			target[vertIdx] = srcCopy[vertIdx] + (smoothedPos - srcCopy[vertIdx]) * smoothAmount;
 		}
+
 		// copy the target array to be the source of the next iteration
-		CHECK_MSTATUS(copy.copy(target));
+		CHECK_MSTATUS(srcCopy.copy(target));
 	}
 }
 
@@ -418,10 +416,11 @@ MStatus CustomDeltaMushDeformer::initialize()
 	CHECK_MSTATUS(nAttr.setMax(1));
 	CHECK_MSTATUS(addAttribute(smoothAmount));
 
+	CHECK_MSTATUS(attributeAffects(globalScale, outputGeom));
 	CHECK_MSTATUS(attributeAffects(rebind, outputGeom));
+	CHECK_MSTATUS(attributeAffects(applyDelta, outputGeom));
 	CHECK_MSTATUS(attributeAffects(smoothIterations, outputGeom));
 	CHECK_MSTATUS(attributeAffects(smoothAmount, outputGeom));
-	CHECK_MSTATUS(attributeAffects(globalScale, outputGeom));
 
 	//MGlobal::executeCommand("makePaintable -attrType multiFloat -sm deformer CustomDeltaMushDeformer weights");
 
