@@ -24,10 +24,9 @@ MTypeId CustomDeltaMushDeformer::id(0x80095);
 MObject CustomDeltaMushDeformer::deltaMushMatrix;
 
 MObject CustomDeltaMushDeformer::rebind;
-MObject CustomDeltaMushDeformer::referenceMesh;
-MObject CustomDeltaMushDeformer::iterations;
+MObject CustomDeltaMushDeformer::smoothIterations;
 MObject CustomDeltaMushDeformer::applyDelta;
-MObject CustomDeltaMushDeformer::amount;
+MObject CustomDeltaMushDeformer::smoothAmount;
 MObject CustomDeltaMushDeformer::globalScale;
 
 
@@ -90,9 +89,11 @@ MStatus CustomDeltaMushDeformer::deform(MDataBlock& data, MItGeometry& iter, con
 		//iter.setPosition(deformed[iter.index()]);
 	}
 
+	MFnDependencyNode thisNode(thisMObject());
+	MObject origGeom = thisNode.attribute("originalGeometry", &returnStat);
 
 	{
-		MPlug refMeshPlug(thisMObject(), referenceMesh);
+		MPlug refMeshPlug(thisMObject(), origGeom);
 		if (!refMeshPlug.isConnected())
 		{
 			std::cout << "ref mesh not connected" << std::endl;
@@ -100,11 +101,11 @@ MStatus CustomDeltaMushDeformer::deform(MDataBlock& data, MItGeometry& iter, con
 		}
 
 		// getting needed data
-		MObject referenceMeshV = skinnedMesh;//data.inputValue(referenceMesh).asMesh();
+		MObject originalGeomV = data.inputArrayValue(origGeom, &returnStat).inputValue().asMesh();
 		double envelopeV = data.inputValue(envelope).asFloat();
-		int iterationsV = data.inputValue(iterations).asInt();
+		int iterationsV = data.inputValue(smoothIterations).asInt();
 		double applyDeltaV = data.inputValue(applyDelta).asDouble();
-		double amountV = data.inputValue(amount).asDouble();
+		double amountV = data.inputValue(smoothAmount).asDouble();
 		bool rebindV = data.inputValue(rebind).asBool();
 		double globalScaleV = data.inputValue(globalScale).asDouble();
 
@@ -115,7 +116,7 @@ MStatus CustomDeltaMushDeformer::deform(MDataBlock& data, MItGeometry& iter, con
 		if (!initialized || rebindV)
 		{
 			// binding the mesh
-			rebindData(referenceMeshV, iterationsV, amountV);
+			rebindData(originalGeomV, iterationsV, amountV);
 			initialized = true;
 		}
 
@@ -215,12 +216,14 @@ MStatus CustomDeltaMushDeformer::deform(MDataBlock& data, MItGeometry& iter, con
 	return returnStat;
 }
 
-void CustomDeltaMushDeformer::initData(MObject& mesh, int iters)
+MStatus CustomDeltaMushDeformer::initData(MObject& mesh, int iters)
 {
+	MStatus returnStat;
+
 	// building mfn mesh
 	MFnMesh meshFn(mesh);
 	// extract the number of vertices
-	int size = meshFn.numVertices();
+	int size = meshFn.numVertices(&returnStat);
 
 	// scaling the data points array
 	dataPoints.resize(size);
@@ -228,9 +231,9 @@ void CustomDeltaMushDeformer::initData(MObject& mesh, int iters)
 	MPointArray pos, res;
 	// using a mesh vertex iterator, we need that to extract the neighbours
 	MItMeshVertex iter(mesh);
-	iter.reset();
+	CHECK_MSTATUS(iter.reset());
 	// extracting the world position
-	meshFn.getPoints(pos, MSpace::kWorld);
+	CHECK_MSTATUS(meshFn.getPoints(pos, MSpace::kWorld));
 
 	MVectorArray arr;
 	// loop the vertices
@@ -239,7 +242,7 @@ void CustomDeltaMushDeformer::initData(MObject& mesh, int iters)
 		// creating a new point
 		point_data pt;
 		// querying the neighbours
-		iter.getConnectedVertices(pt.neighbours);
+		CHECK_MSTATUS(iter.getConnectedVertices(pt.neighbours));
 		// extracting neighbour size
 		pt.size = pt.neighbours.length();
 		// setting the point in the right array
@@ -247,20 +250,22 @@ void CustomDeltaMushDeformer::initData(MObject& mesh, int iters)
 
 		// pre-allocating the deltas array
 		arr = MVectorArray();
-		arr.setLength(pt.size);
+		CHECK_MSTATUS(arr.setLength(pt.size));
 		dataPoints[i].delta = arr;
 	}
+
+	return returnStat;
 }
 
 void CustomDeltaMushDeformer::averageRelax(MPointArray& source, MPointArray& target, int iter, double amountV)
 {
 	// rescaling the target array if needed
 	int size = source.length();
-	target.setLength(size);
+	CHECK_MSTATUS(target.setLength(size));
 
 	// making a copy of the original
 	MPointArray copy;
-	copy.copy(source);
+	CHECK_MSTATUS(copy.copy(source));
 
 	MVector tmp;
 	int i, n, it;
@@ -285,7 +290,7 @@ void CustomDeltaMushDeformer::averageRelax(MPointArray& source, MPointArray& tar
 			target[i] = copy[i] + (tmp - copy[i]) * amountV;
 		}
 		// copy the target array to be the source of the next iteration
-		copy.copy(target);
+		CHECK_MSTATUS(copy.copy(target));
 	}
 }
 
@@ -311,8 +316,8 @@ void CustomDeltaMushDeformer::computeDelta(MPointArray& source, MPointArray& tar
 			v1 = target[point.neighbours[n]] - target[i];
 			v2 = target[point.neighbours[n + 1]] - target[i];
 
-			v2.normalize();
-			v1.normalize();
+			CHECK_MSTATUS(v2.normalize());
+			CHECK_MSTATUS(v1.normalize());
 
 			cross = v1 ^ v2;
 			v2 = cross ^ v1;
@@ -343,13 +348,16 @@ void CustomDeltaMushDeformer::computeDelta(MPointArray& source, MPointArray& tar
 void CustomDeltaMushDeformer::rebindData(MObject& mesh, int iter, double amount)
 {
 	// basically resized arrays and backing down neighbours
-	initData(mesh, iter);
+	CHECK_MSTATUS(initData(mesh, iter));
+
 	MPointArray posRev, back;
 	MFnMesh meshFn(mesh);
-	meshFn.getPoints(posRev, MSpace::kObject);
-	back.copy(posRev);
+	CHECK_MSTATUS(meshFn.getPoints(posRev, MSpace::kObject));
+	CHECK_MSTATUS(back.copy(posRev));
+
 	// calling the smooth function
 	averageRelax(posRev, back, iter, amount);
+
 	// computing the deltas
 	computeDelta(posRev, back);
 }
@@ -363,66 +371,59 @@ MStatus CustomDeltaMushDeformer::initialize()
 {
 	MStatus returnStat;
 
-	//MFnTypedAttribute tAttr;
-	//deltaMushMatrix = tAttr.create("deltaMushMatrix", "dmMat", MFnData::kMatrixArray, MObject::kNullObj, &returnStat);
-	MFnMatrixAttribute mAttr;
-	deltaMushMatrix = mAttr.create("deltaMushMatrix", "dmMat", MFnMatrixAttribute::kDouble, &returnStat);
-	CHECK_MSTATUS(returnStat);
-	CHECK_MSTATUS(mAttr.setArray(true));
-
-	CHECK_MSTATUS(addAttribute(deltaMushMatrix));
-
-	CHECK_MSTATUS(attributeAffects(deltaMushMatrix, outputGeom));
-
 	{
-		MFnTypedAttribute tAttr;
-		MFnNumericAttribute nAttr;
+		//MFnTypedAttribute tAttr;
+		//deltaMushMatrix = tAttr.create("deltaMushMatrix", "dmMat", MFnData::kMatrixArray, MObject::kNullObj, &returnStat);
+		MFnMatrixAttribute mAttr;
+		deltaMushMatrix = mAttr.create("deltaMushMatrix", "dmMat", MFnMatrixAttribute::kDouble, &returnStat);
+		CHECK_MSTATUS(returnStat);
+		CHECK_MSTATUS(mAttr.setArray(true));
 
-		globalScale = nAttr.create("globalScale", "gls", MFnNumericData::kDouble, 1.0);
-		nAttr.setKeyable(true);
-		nAttr.setStorable(true);
-		nAttr.setMin(0.0001);
-		addAttribute(globalScale);
+		CHECK_MSTATUS(addAttribute(deltaMushMatrix));
 
-		rebind = nAttr.create("rebind", "rbn", MFnNumericData::kBoolean, 0);
-		nAttr.setKeyable(true);
-		nAttr.setStorable(true);
-		addAttribute(rebind);
-
-		applyDelta = nAttr.create("applyDelta", "apdlt", MFnNumericData::kDouble, 1.0);
-		nAttr.setKeyable(true);
-		nAttr.setStorable(true);
-		nAttr.setMin(0);
-		nAttr.setMax(1);
-		addAttribute(applyDelta);
-
-		iterations = nAttr.create("iterations", "itr", MFnNumericData::kInt, 0);
-		nAttr.setKeyable(true);
-		nAttr.setStorable(true);
-		nAttr.setMin(0);
-		addAttribute(iterations);
-
-		amount = nAttr.create("amount", "am", MFnNumericData::kDouble, 0.5);
-		nAttr.setKeyable(true);
-		nAttr.setStorable(true);
-		nAttr.setMin(0);
-		nAttr.setMax(1);
-		addAttribute(amount);
-
-		referenceMesh = tAttr.create("referenceMesh", "rfm", MFnData::kMesh);
-		tAttr.setKeyable(true);
-		tAttr.setWritable(true);
-		tAttr.setStorable(true);
-		addAttribute(referenceMesh);
-
-		attributeAffects(referenceMesh, outputGeom);
-		attributeAffects(rebind, outputGeom);
-		attributeAffects(iterations, outputGeom);
-		attributeAffects(amount, outputGeom);
-		attributeAffects(globalScale, outputGeom);
-
-		//MGlobal::executeCommand("makePaintable -attrType multiFloat -sm deformer CustomDeltaMushDeformer weights");
+		CHECK_MSTATUS(attributeAffects(deltaMushMatrix, outputGeom));
 	}
+
+	MFnTypedAttribute tAttr;
+	MFnNumericAttribute nAttr;
+
+	globalScale = nAttr.create("globalScale", "gls", MFnNumericData::kDouble, 1.0, &returnStat);
+	CHECK_MSTATUS(nAttr.setKeyable(true));
+	CHECK_MSTATUS(nAttr.setStorable(true));
+	CHECK_MSTATUS(nAttr.setMin(0.0001));
+	CHECK_MSTATUS(addAttribute(globalScale));
+
+	rebind = nAttr.create("rebind", "rbn", MFnNumericData::kBoolean, 1, &returnStat);
+	CHECK_MSTATUS(nAttr.setKeyable(true));
+	CHECK_MSTATUS(nAttr.setStorable(true));
+	CHECK_MSTATUS(addAttribute(rebind));
+
+	applyDelta = nAttr.create("applyDelta", "apdlt", MFnNumericData::kDouble, 1.0, &returnStat);
+	CHECK_MSTATUS(nAttr.setKeyable(true));
+	CHECK_MSTATUS(nAttr.setStorable(true));
+	CHECK_MSTATUS(nAttr.setMin(0));
+	CHECK_MSTATUS(nAttr.setMax(1));
+	CHECK_MSTATUS(addAttribute(applyDelta));
+
+	smoothIterations = nAttr.create("smoothIterations", "itr", MFnNumericData::kInt, 0, &returnStat);
+	CHECK_MSTATUS(nAttr.setKeyable(true));
+	CHECK_MSTATUS(nAttr.setStorable(true));
+	CHECK_MSTATUS(nAttr.setMin(0));
+	CHECK_MSTATUS(addAttribute(smoothIterations));
+
+	smoothAmount = nAttr.create("smoothAmount", "sa", MFnNumericData::kDouble, 0.5, &returnStat);
+	CHECK_MSTATUS(nAttr.setKeyable(true));
+	CHECK_MSTATUS(nAttr.setStorable(true));
+	CHECK_MSTATUS(nAttr.setMin(0));
+	CHECK_MSTATUS(nAttr.setMax(1));
+	CHECK_MSTATUS(addAttribute(smoothAmount));
+
+	CHECK_MSTATUS(attributeAffects(rebind, outputGeom));
+	CHECK_MSTATUS(attributeAffects(smoothIterations, outputGeom));
+	CHECK_MSTATUS(attributeAffects(smoothAmount, outputGeom));
+	CHECK_MSTATUS(attributeAffects(globalScale, outputGeom));
+
+	//MGlobal::executeCommand("makePaintable -attrType multiFloat -sm deformer CustomDeltaMushDeformer weights");
 
 	return returnStat;
 }

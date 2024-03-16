@@ -35,13 +35,10 @@ public:
 	inline static const MString nodeTypeName = "customDeltaMushDeformer";
 
 public:
-	static MObject referenceMesh;
 	static MObject rebind;
-	static MObject iterations;
-	//static MObject useMulti;
+	static MObject smoothIterations;
 	static MObject applyDelta;
-	static MObject amount;
-	//static MObject mapMult;
+	static MObject smoothAmount;
 	static MObject globalScale;
 
 private:
@@ -49,7 +46,7 @@ private:
 	std::vector<point_data> dataPoints;
 	bool initialized;
 
-	void initData(MObject& mesh, int iters);
+	MStatus initData(MObject& mesh, int iters);
 	void averageRelax(MPointArray& source, MPointArray& target, int iter, double amountV);
 	void computeDelta(MPointArray& source, MPointArray& target);
 	void rebindData(MObject& mesh, int iter, double amount);
