@@ -1,28 +1,38 @@
 #include "DeltaMushUtil.h"
+#include "MeshLaplacian.h"
 #include <maya/MItMeshVertex.h>
+#include <maya/MItMeshEdge.h>
 #include <maya/MIntArray.h>
 #include <maya/MMatrix.h>
 #include <maya/MMatrixArray.h>
 #include <cassert>
+#include <set>
 
 namespace DMUtil
 {
-	MStatus SmoothMesh(MObject& mesh, const MPointArray& original, MPointArray& smoothed)
+	MStatus SmoothMesh(MObject& mesh, const MPointArray& original, MPointArray& smoothed, int smoothItr, double smoothAmount)
 	{
-		MStatus returnStat;
-
 		const unsigned int numVerts = original.length();
-		returnStat = smoothed.setLength(numVerts);
+		CHECK_MSTATUS(smoothed.setLength(numVerts));
 
-		MItMeshVertex itVertex(mesh);
-		for (itVertex.reset(); !itVertex.isDone(); itVertex.next())
+		// compute the smoothing matrix
+		Eigen::SparseMatrix<double> B(numVerts, numVerts);
+		bool isImplicit = false;
+		MeshLaplacian::ComputeSmoothingMatrix(std::move(MItMeshEdge(mesh)), numVerts, smoothAmount, smoothItr, isImplicit, B);
+
+		for (unsigned int idx = 0; idx < numVerts; idx++)
 		{
-			MPoint pos(0, 0, 0);
-			SmoothVertex(pos, itVertex, original);
-			smoothed[itVertex.index()] = pos;
+			smoothed[idx] = MPoint(0, 0, 0, 0);
+
+			for (unsigned int k = 0; k < numVerts; k++)
+			{
+				smoothed[idx] += B.coeff(k, idx) * original[k];
+			}
+
+			smoothed[idx].w = 1.0;
 		}
 
-		return returnStat;
+		return MS::kSuccess;
 	}
 
 	MStatus SmoothVertex(MPoint& smoothed, MItMeshVertex& itVertex, const MPointArray& points)
@@ -64,7 +74,7 @@ namespace DMUtil
 
 		// smooth 後の頂点を計算
 		MPointArray smoothedPoints;
-		SmoothMesh(mesh, originalPoints, smoothedPoints);
+		SmoothMesh(mesh, originalPoints, smoothedPoints, 1, 1.0);
 
 		// smooth 後の各頂点に対して、normal、tangent、bitangent を計算していく
 		MItMeshVertex itVertex(mesh);

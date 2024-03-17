@@ -2,6 +2,7 @@
 #include <Spectra/MatOp/SparseCholesky.h>
 #include <Spectra/GenEigsSolver.h>
 #include <Spectra/MatOp/SparseGenMatProd.h>
+
 #include <iomanip>
 #include <filesystem>
 #include <fstream>
@@ -133,7 +134,7 @@ void MeshLaplacian::GetDiagonalizationResult(
     if (!std::filesystem::exists(filepath))
     {
         Eigen::SparseMatrix<double> laplacian;
-        ComputeLaplacian(indices, numVertices, laplacian);
+        //ComputeLaplacian(indices, numVertices, laplacian);
         DiagonalizeGenSparseMatrix(laplacian, filepath);
     }
 
@@ -169,32 +170,32 @@ void MeshLaplacian::GetDiagonalizationResult(
     }
 }
 
-void MeshLaplacian::ComputeLaplacian(const std::vector<unsigned int>& indices, const int numVertices, Eigen::SparseMatrix<double>& laplacian)
+void MeshLaplacian::ComputeLaplacian(MItMeshEdge& itEdge, const int numVertices, Eigen::SparseMatrix<double>& laplacian)
 {
     // generate the normalized Laplacian Matrix
     unsigned int matSize = numVertices;
     std::vector<Trp> tripletVec;
     Eigen::VectorXd degrees = Eigen::VectorXd::Zero(matSize);
     std::set<std::pair<int, int>> countedEdges;
-    for (size_t idx = 0; idx < indices.size(); idx += 3)
+    for (itEdge.reset(); !itEdge.isDone(); itEdge.next())
     {
-        std::array<int, 3> verts = { indices[idx], indices[idx + 1], indices[idx + 2] };
-        std::sort(verts.begin(), verts.end());
-        std::pair<int, int> edges[3] = { {verts[0], verts[1]}, {verts[1], verts[2]}, {verts[0], verts[2]} };
+        // get the vertices in the edge
+        int idx0 = itEdge.index(0), idx1 = itEdge.index(1);
 
-        for (auto edge : edges)
+        auto edge = std::pair<int, int>(idx0, idx1);
+        if (countedEdges.find(edge) == countedEdges.end())// ‚±‚Ì if •¶‚Í•s—v
         {
-            // if not contained in countedEdges, count the edge
-            if (countedEdges.find(edge) == countedEdges.end())
-            {
-                degrees[edge.first] += 1;
-                degrees[edge.second] += 1;
+            degrees[idx0] += 1;
+            degrees[idx1] += 1;
 
-                tripletVec.push_back(Trp(edge.first, edge.second, 1));
-                tripletVec.push_back(Trp(edge.second, edge.first, 1));
+            tripletVec.push_back(Trp(idx0, idx1, 1));
+            tripletVec.push_back(Trp(idx1, idx0, 1));
 
-                countedEdges.insert(edge);
-            }
+            countedEdges.emplace(std::move(edge));
+        }
+        else
+        {
+            std::cout << "‚±‚±‚É‚Í—ˆ‚È‚¢‚æ‚Ë‚¥" << std::endl;
         }
     }
 
@@ -255,7 +256,7 @@ void MeshLaplacian::ComputeSmoothingMatrix(
 }
 
 void MeshLaplacian::ComputeSmoothingMatrix(
-    const std::vector<unsigned int>& indices,
+    MItMeshEdge& itEdge,
     const int numVertices,
     double lambda,
     int p,
@@ -263,7 +264,7 @@ void MeshLaplacian::ComputeSmoothingMatrix(
     Eigen::SparseMatrix<double>& B)
 {
     Eigen::SparseMatrix<double> laplacian;
-    ComputeLaplacian(indices, numVertices, laplacian);
+    ComputeLaplacian(itEdge, numVertices, laplacian);
 
     Eigen::SparseMatrix<double> Identity(numVertices, numVertices);
     Identity.setIdentity();
@@ -289,9 +290,18 @@ void MeshLaplacian::ComputeSmoothingMatrix(
         seed -= lambda * laplacian;
     }
 
-    B = seed;
-    while (--p > 0)
+    B = Identity;
+    for (int i = 0; p!= 0 ; i++)
     {
-        B = B * B;
+        if (i > 0)
+        {
+            seed = seed * seed;
+        }
+
+        if (p & (1<<i))
+        {
+            B = B * seed;
+            p &= ~(1 << i);
+        }
     }
 }

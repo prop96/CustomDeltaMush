@@ -2,6 +2,7 @@
 
 #include <Eigen/Sparse>
 #include <vector>
+#include <maya/MItMeshEdge.h>
 
 class MeshLaplacian
 {
@@ -24,7 +25,7 @@ public:
 	/// <param name="numVertices"></param>
 	/// <returns></returns>
 	static void ComputeLaplacian(
-		const std::vector<unsigned int>& indices,
+		MItMeshEdge& itEdge,
 		const int numVertices,
 		Eigen::SparseMatrix<double>& laplacian);
 
@@ -36,7 +37,7 @@ public:
 		int p);
 
 	static void ComputeSmoothingMatrix(
-		const std::vector<unsigned int>& indices,
+		MItMeshEdge& itEdge,
 		const int numVertices,
 		double lambda,
 		int p,

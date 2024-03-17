@@ -134,7 +134,7 @@ MStatus CustomDeltaMushDeformer::deform(MDataBlock& data, MItGeometry& iter, con
 		MPointArray final;
 
 		// here we perform the smooth
-		averageRelax(pos, targetPos, iterationsV, amountV);
+		averageRelax(skinnedMesh, pos, targetPos, iterationsV, amountV);
 		if (iterationsV == 0)
 		{
 			return MS::kSuccess;
@@ -257,8 +257,11 @@ MStatus CustomDeltaMushDeformer::initData(MObject& mesh, int iters)
 	return returnStat;
 }
 
-void CustomDeltaMushDeformer::averageRelax(const MPointArray& source, MPointArray& target, int smoothItr, double smoothAmount)
+void CustomDeltaMushDeformer::averageRelax(MObject& mesh, const MPointArray& source, MPointArray& target, int smoothItr, double smoothAmount)
 {
+	CHECK_MSTATUS(DMUtil::SmoothMesh(mesh, source, target, smoothItr, smoothAmount));
+	return;
+
 	// set the length of the target array
 	const unsigned int numVertices = source.length();
 	target.setLength(numVertices);
@@ -354,7 +357,7 @@ void CustomDeltaMushDeformer::rebindData(MObject& mesh, int iter, double amount)
 	CHECK_MSTATUS(back.copy(posRev));
 
 	// calling the smooth function
-	averageRelax(posRev, back, iter, amount);
+	averageRelax(mesh, posRev, back, iter, amount);
 
 	// computing the deltas
 	computeDelta(posRev, back);

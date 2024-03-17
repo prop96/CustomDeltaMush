@@ -47,7 +47,7 @@ private:
 	bool initialized;
 
 	MStatus initData(MObject& mesh, int iters);
-	void averageRelax(const MPointArray& source, MPointArray& target, int smoothIter, double smoothAmount);
+	void averageRelax(MObject& mesh, const MPointArray& source, MPointArray& target, int smoothIter, double smoothAmount);
 	void computeDelta(MPointArray& source, MPointArray& target);
 	void rebindData(MObject& mesh, int iter, double amount);
 };
