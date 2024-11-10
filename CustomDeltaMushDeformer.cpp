@@ -11,356 +11,311 @@
 #include <maya/MFnNumericAttribute.h>
 #include <maya/MGlobal.h>
 #include <cassert>
-
-/*
-* select object and type
-*   deformer -type SwirlDeformer
-*/
-
-#define SMALL (float)1e-6
+#include <numeric>
 
 // instancing the static fields
 MTypeId CustomDeltaMushDeformer::id(0x80095);
-MObject CustomDeltaMushDeformer::deltaMushMatrix;
-
+MString CustomDeltaMushDeformer::pluginPath;
 MObject CustomDeltaMushDeformer::rebind;
 MObject CustomDeltaMushDeformer::smoothIterations;
 MObject CustomDeltaMushDeformer::applyDelta;
 MObject CustomDeltaMushDeformer::smoothAmount;
-MObject CustomDeltaMushDeformer::globalScale;
 
+namespace {
 
-CustomDeltaMushDeformer::CustomDeltaMushDeformer()
-	: initialized(false)
-{
-	targetPos.setLength(0);
-}
+	constexpr double Eps = std::numeric_limits<double>::epsilon();
 
-MStatus CustomDeltaMushDeformer::compute(const MPlug& plug, MDataBlock& data)
-{
-	MString info = plug.info();
-	cout << info << endl;
+	MMatrix ComputeTangentMatrix(const MPoint& pos, const MPoint& posNeighbor0, const MPoint& posNeighbor1)
+	{
+		// 注目している頂点と隣接頂点の作る三角形ポリゴンを考えて、tangent matrix を作る
+		MVector v0 = posNeighbor0 - pos;
+		MVector v1 = posNeighbor1 - pos;
 
-	return MPxDeformerNode::compute(plug, data);
+		v0.normalize();
+		v1.normalize();
+
+		// tangent, normal, binormal
+		MVector t = v0;
+		MVector n = t ^ v1;
+		MVector b = n ^ t;
+
+		MMatrix mat = MMatrix();
+		{
+			mat[0][0] = t.x;
+			mat[0][1] = t.y;
+			mat[0][2] = t.z;
+			mat[0][3] = 0;
+			mat[1][0] = b.x;
+			mat[1][1] = b.y;
+			mat[1][2] = b.z;
+			mat[1][3] = 0;
+			mat[2][0] = n.x;
+			mat[2][1] = n.y;
+			mat[2][2] = n.z;
+			mat[2][3] = 0;
+			mat[3][0] = 0;
+			mat[3][1] = 0;
+			mat[3][2] = 0;
+			mat[3][3] = 1;
+		}
+
+		return mat;
+	}
+
+	void MPointArrayToVector(std::vector<MPoint>& vec, const MPointArray& ptArr)
+	{
+		const uint32_t num = ptArr.length();
+		vec.resize(num);
+		for (uint32_t idx = 0; idx < num; idx++)
+		{
+			vec[idx] = ptArr[idx];
+		}
+	}
+
+	void VectorToMPointArray(MPointArray& ptArr, const std::vector<MPoint>& vec)
+	{
+		const uint32_t num = vec.size();
+		ptArr.setLength(num);
+		for (uint32_t idx = 0; idx < num; idx++)
+		{
+			ptArr[idx] = vec[idx];
+		}
+	}
 }
 
 MStatus CustomDeltaMushDeformer::deform(MDataBlock& data, MItGeometry& iter, const MMatrix& localToWorld, unsigned int multiIdx)
 {
 	MStatus returnStat;
 
-	// get the attribute instance of input[0].inputGeometry
-	MObject skinnedMesh = data.inputArrayValue(input).inputValue().child(inputGeom).data();
-
-	// get all the positions of the vertices
-	MFnMesh meshFn(skinnedMesh);
-	MPointArray skinnedPoints;
-	meshFn.getPoints(skinnedPoints);
-
-	// get the deltaMushMatrix plug
-	MArrayDataHandle dmArrayHandle = data.inputArrayValue(deltaMushMatrix, &returnStat);
-	CHECK_MSTATUS(returnStat);
-	int num = dmArrayHandle.elementCount();
-	cout << num << endl;
-
-	MPointArray deformed;
-	deformed.setLength(num);
-
-	MMatrixArray mats;
-	DMUtil::CreateDeltaMushMatrix(skinnedMesh, mats);
-
-	MItMeshVertex itVertex(skinnedMesh);
-	for (itVertex.reset(); !itVertex.isDone(); itVertex.next())
+	// set smoothing property
 	{
-		CHECK_MSTATUS(dmArrayHandle.jumpToElement(itVertex.index()));
-
-		MMatrix inv = dmArrayHandle.inputValue(&returnStat).asMatrix().inverse();
-		CHECK_MSTATUS(returnStat);
-
-		MMatrix mat = mats[itVertex.index()];
-		//CHECK_MSTATUS(DMUtil::CreateDeltaMushMatrix(mat, itVertex, meshFn, skinnedPoints));
-
-		MPoint pos = itVertex.position();
-		pos = pos * inv * mat;
-		deformed[itVertex.index()] = pos;
+		int32_t iterationsVal = data.inputValue(smoothIterations).asInt();
+		double amountVal = data.inputValue(smoothAmount).asDouble();
+		SetSmoothingData(iterationsVal, amountVal);
 	}
 
-	for (iter.reset(); !iter.isDone(); iter.next())
-	{
-		//iter.setPosition(deformed[iter.index()]);
-	}
-
+	// get originalGeometry attribute
 	MFnDependencyNode thisNode(thisMObject());
 	MObject origGeom = thisNode.attribute("originalGeometry", &returnStat);
+	CHECK_MSTATUS(returnStat);
 
+	// error if originalGeometry attribute is not connected
+	if (MPlug refMeshPlug(thisMObject(), origGeom); !refMeshPlug.elementByLogicalIndex(0).isConnected(&returnStat))
 	{
-		MPlug refMeshPlug(thisMObject(), origGeom);
-		if (!refMeshPlug.isConnected())
+		returnStat.perror("mesh to bind is not connected");
+		return MS::kFailure;
+	}
+
+	// initialize data for the mesh to bind if still not
+	if (bool rebindVal = data.inputValue(rebind).asBool(); rebindVal || !m_isInitialized)
+	{
+		// bind the original mesh
+		MObject originalGeomVal = data.inputArrayValue(origGeom, &returnStat).inputValue().asMesh();
+		InitializeData(originalGeomVal);
+		data.inputValue(rebind).setBool(false);
+	}
+
+	// noting to do if envelop is zero
+	double envelopeVal = static_cast<double>(data.inputValue(envelope).asFloat());
+	if (envelopeVal < Eps)
+	{
+		return MS::kSuccess;
+	}
+
+	// apply delta mush
+	std::vector<MPoint> finalPos;
+	{
+		double applyDeltaVal = data.inputValue(applyDelta).asDouble();
+
+		std::vector<MPoint> initPos;
 		{
-			std::cout << "ref mesh not connected" << std::endl;
-			//return MS::kNotImplemented;
+			MPointArray tmpInitPos;
+			iter.allPositions(tmpInitPos, MSpace::kWorld);
+			MPointArrayToVector(initPos, tmpInitPos);
 		}
 
-		// getting needed data
-		MObject originalGeomV = data.inputArrayValue(origGeom, &returnStat).inputValue().asMesh();
-		double envelopeV = data.inputValue(envelope).asFloat();
-		int iterationsV = data.inputValue(smoothIterations).asInt();
-		double applyDeltaV = data.inputValue(applyDelta).asDouble();
-		double amountV = data.inputValue(smoothAmount).asDouble();
-		bool rebindV = data.inputValue(rebind).asBool();
-		double globalScaleV = data.inputValue(globalScale).asDouble();
+		ApplyDeltaMush(initPos, finalPos, envelopeVal, applyDeltaVal);
+	}
 
-		// extracting the points
-		MPointArray pos;
-		iter.allPositions(pos, MSpace::kWorld);
-
-		if (!initialized || rebindV)
-		{
-			// binding the mesh
-			rebindData(originalGeomV, iterationsV, amountV);
-			initialized = true;
-		}
-
-		if (envelopeV < SMALL)
-		{
-			return MS::kSuccess;
-		}
-
-		int size = iter.exactCount();
-		int i, n;
-		MVector delta, v1, v2, cross;
-
-		double weight;
-		MMatrix mat;
-		MPointArray final;
-
-		// here we perform the smooth
-		averageRelax(skinnedMesh, pos, targetPos, iterationsV, amountV);
-		if (iterationsV == 0)
-		{
-			return MS::kSuccess;
-		}
-		else
-		{
-			final.copy(targetPos);
-		}
-
-		// loopint the vertices, we know neet to re-apply the delta
-		for (i = 0; i < size; i++)
-		{
-			// zeroing out the vector
-			delta = MVector::zero;
-			if (applyDeltaV >= SMALL)
-			{
-				// looping the neighbours
-				for (n = 0; n < dataPoints[i].size-1; n++)
-				{
-					// extracting the next two neighbours and compute the vector
-					v1 = targetPos[dataPoints[i].neighbours[n]] - targetPos[i];
-					v2 = targetPos[dataPoints[i].neighbours[n + 1]] - targetPos[i];
-
-					// normalizing
-					v2.normalize();
-					v1.normalize();
-
-					// build cross matrix
-					cross = v1 ^ v2;
-					v2 = cross ^ v1;
-
-					// building the matrix
-					mat = MMatrix();
-					mat[0][0] = v1.x;
-					mat[0][1] = v1.y;
-					mat[0][2] = v1.z;
-					mat[0][3] = 0;
-					mat[1][0] = v2.x;
-					mat[1][1] = v2.y;
-					mat[1][2] = v2.z;
-					mat[1][3] = 0;
-					mat[2][0] = cross.x;
-					mat[2][1] = cross.y;
-					mat[2][2] = cross.z;
-					mat[2][3] = 0;
-					mat[3][0] = 0;
-					mat[3][1] = 0;
-					mat[3][2] = 0;
-					mat[3][3] = 1;
-
-					// accumulate the newly computed delta
-					delta += (dataPoints[i].delta[n] * mat);
-				}
-			}
-
-			// averaging
-			delta /= double(dataPoints[i].size);
-			// scaling the vertex
-			delta = delta.normal() * (dataPoints[i].deltaLen * applyDeltaV * globalScaleV);
-			// adding the delta to the position
-			final[i] += delta;
-
-			// now we generate a vector from the final position compute and the starging one
-			// and we scale it by the weights and the envelope. "pos" is the original input mesh
-			delta = final[i] - pos[i];
-
-			// querying the weight
-			weight = weightValue(data, multiIdx, i);
-			// FIXME: i = 0,1,2 だけ weight が異常な値になっている
-			weight = fmaxf(0, fminf(weight, 1));
-			// finally setting the final position
-			final[i] = pos[i] + (delta * weight * envelopeV);
-		}
-
-		// setting all the points
-		iter.setAllPositions(final);
+	// setting all the points
+	{
+		MPointArray tmpFinalPos;
+		VectorToMPointArray(tmpFinalPos, finalPos);
+		iter.setAllPositions(tmpFinalPos);
 	}
 
 	return returnStat;
 }
 
-MStatus CustomDeltaMushDeformer::initData(MObject& mesh, int iters)
+MStatus CustomDeltaMushDeformer::InitializeData(MObject& mesh)
 {
-	MStatus returnStat;
+	MStatus stat;
 
-	// building mfn mesh
-	MFnMesh meshFn(mesh);
-	// extract the number of vertices
-	int size = meshFn.numVertices(&returnStat);
+	// 頂点ごとのデータ配列を初期化
+	m_pointData.clear();
 
-	// scaling the data points array
-	dataPoints.resize(size);
-
-	MPointArray pos, res;
-	// using a mesh vertex iterator, we need that to extract the neighbours
+	// 頂点の隣接情報を格納
 	MItMeshVertex iter(mesh);
-	CHECK_MSTATUS(iter.reset());
-	// extracting the world position
-	CHECK_MSTATUS(meshFn.getPoints(pos, MSpace::kWorld));
-
-	MVectorArray arr;
-	// loop the vertices
-	for (int i = 0; i < size; i++, iter.next())
+	for (iter.reset(); !iter.isDone(); iter.next())
 	{
-		// creating a new point
-		point_data pt;
-		// querying the neighbours
-		CHECK_MSTATUS(iter.getConnectedVertices(pt.neighbours));
-		// extracting neighbour size
-		pt.size = pt.neighbours.length();
-		// setting the point in the right array
-		dataPoints[i] = pt;
+		PointData pd;
 
-		// pre-allocating the deltas array
-		arr = MVectorArray();
-		CHECK_MSTATUS(arr.setLength(pt.size));
-		dataPoints[i].delta = arr;
+		// 隣接頂点インデックスを取得
+		MIntArray neighborIndices;
+		iter.getConnectedVertices(neighborIndices);
+		const uint32_t neighbourNum = neighborIndices.length();
+
+		// PointData に格納
+		pd.NeighbourIndices.resize(neighbourNum);
+		neighborIndices.get(pd.NeighbourIndices.data());
+
+		// 隣接頂点ごとの delta を保持する配列を初期化
+		pd.Delta.resize(neighbourNum - 1);
+
+		m_pointData.push_back(pd);
 	}
 
-	return returnStat;
+	MFnMesh meshFn(mesh);
+
+	// メッシュの頂点座標を取得
+	std::vector<MPoint> posOriginal;
+	{
+		MPointArray tmpPosOriginal;
+		meshFn.getPoints(tmpPosOriginal, MSpace::kObject);
+		MPointArrayToVector(posOriginal, tmpPosOriginal);
+	}
+
+	// Smoothing 処理 (posSmoothed を計算)
+	std::vector<MPoint> posSmoothed;
+	ComputeSmoothedPoints(posOriginal, posSmoothed);
+
+	// Delta を計算して m_pointData に格納
+	ComputeDelta(posOriginal, posSmoothed);
+
+	m_isInitialized = true;
+
+	return stat;
 }
 
-void CustomDeltaMushDeformer::averageRelax(MObject& mesh, const MPointArray& source, MPointArray& target, int smoothItr, double smoothAmount)
+MStatus CustomDeltaMushDeformer::InitializeData(MObject& mesh, uint32_t smoothingIter, double smoothingAmount)
 {
+	SetSmoothingData(smoothingIter, smoothingAmount);
+	return InitializeData(mesh);
+}
+
+void CustomDeltaMushDeformer::ApplyDeltaMush(const std::vector<MPoint>& skinned, std::vector<MPoint>& deformed, double envelope, double applyDeltaAmount) const
+{
+	// NOTE: skinned はワールド座標系での頂点位置と想定
+
+	assert(m_isInitialized);
+
+	const uint32_t numVerts = skinned.size();
+	deformed.resize(numVerts);
+
+	// compute mush
+	std::vector<MPoint> mushed;
+	ComputeSmoothedPoints(skinned, mushed);
+
+	// apply delta to mush
+	for (uint32_t vertIdx = 0; vertIdx < numVerts; vertIdx++)
+	{
+		const PointData& pointData = m_pointData[vertIdx];
+
+		// compute delta in animated pose
+		MVector delta = MVector::zero;
+
+		// looping the neighbours
+		const uint32_t neighbourNum = pointData.NeighbourIndices.size();
+		for (uint32_t neighborIdx = 0; neighborIdx < neighbourNum - 1; neighborIdx++)
+		{
+			MMatrix mat = ComputeTangentMatrix(
+				mushed[vertIdx],
+				mushed[pointData.NeighbourIndices[neighborIdx]],
+				mushed[pointData.NeighbourIndices[neighborIdx + 1]]);
+
+			delta += (pointData.Delta[neighborIdx] * mat);
+		}
+		delta /= static_cast<double>(neighbourNum);
+
+		// delta の長さを合わせる
+		delta = delta.normal() * pointData.DeltaLength;
+
+		// add delta to mush
+		MPoint deltaMushed = mushed[vertIdx] + delta * applyDeltaAmount;
+
+		// envelope を考慮
+		deformed[vertIdx] = skinned[vertIdx] + envelope * (deltaMushed - skinned[vertIdx]);
+	}
+}
+
+void CustomDeltaMushDeformer::SetSmoothingData(uint32_t iter, double amount)
+{
+	m_smoothingData.Iter = iter;
+	m_smoothingData.Amount = amount;
+
+	m_isInitialized = false;
+}
+
+void CustomDeltaMushDeformer::ComputeSmoothedPoints(const std::vector<MPoint>& src, std::vector<MPoint>& smoothed) const
+{
+#if 0
+	// verify Laplacian Smoothing
 	CHECK_MSTATUS(DMUtil::SmoothMesh(mesh, source, target, smoothItr, smoothAmount));
 	return;
+#endif
 
-	// set the length of the target array
-	const unsigned int numVertices = source.length();
-	target.setLength(numVertices);
+	const uint32_t numVerts = src.size();
+	std::vector<MPoint> srcCopy(numVerts);
 
-	// copy the source array
-	MPointArray srcCopy;
-	CHECK_MSTATUS(srcCopy.copy(source));
+	smoothed.resize(numVerts);
+	std::copy(src.begin(), src.end(), smoothed.begin());
 
-	// looping for how many smooth iterations we have
-	for (int itr = 0; itr < smoothItr; itr++)
+	for (uint32_t itr = 0; itr < m_smoothingData.Iter; itr++)
 	{
-		// looping for all the vertices to smooth the given mesh
-		for (int vertIdx = 0; vertIdx < numVertices; vertIdx++)
-		{
-			const point_data& pointData = dataPoints[vertIdx];
+		srcCopy.swap(smoothed);
 
-			// compute smoothed vertex position by looping the neighbours
+		for (uint32_t vertIdx = 0; vertIdx < numVerts; vertIdx++)
+		{
+			const PointData& pointData = m_pointData[vertIdx];
+
+			// 隣接頂点の平均としてスムージング
 			MVector smoothedPos = MVector::zero;
-			for (const int neighbourVertIdx : pointData.neighbours)
+			for (const int neighbourIdx : pointData.NeighbourIndices)
 			{
-				smoothedPos += srcCopy[neighbourVertIdx];
+				smoothedPos += srcCopy[neighbourIdx];
 			}
-			smoothedPos /= double(pointData.size);
+			smoothedPos *= 1.0 / double(pointData.NeighbourIndices.size());
 
-			// compute the final position by blending the smoothed and original position
-			target[vertIdx] = srcCopy[vertIdx] + (smoothedPos - srcCopy[vertIdx]) * smoothAmount;
+			smoothed[vertIdx] = srcCopy[vertIdx] + (smoothedPos - srcCopy[vertIdx]) * m_smoothingData.Amount;
 		}
-
-		// copy the target array to be the source of the next iteration
-		CHECK_MSTATUS(srcCopy.copy(target));
 	}
 }
 
-void CustomDeltaMushDeformer::computeDelta(MPointArray& source, MPointArray& target)
+void CustomDeltaMushDeformer::ComputeDelta(const std::vector<MPoint>& src, const std::vector<MPoint>& smoothed)
 {
-	int size = source.length();
-	MVectorArray arr;
-	MVector delta, v1, v2, cross;
-	int i, n;
-	MMatrix mat;
+	const uint32_t numVerts = src.size();
 
-	// build the matrix
-	for (i = 0; i < size; i++)
+	// 各頂点ごとにデルタを計算
+	for (uint32_t vertIdx = 0; vertIdx < numVerts; vertIdx++)
 	{
-		delta = MVector(source[i] - target[i]);
+		PointData& pointData = m_pointData[vertIdx];
 
-		point_data& point = dataPoints[i];
-		
-		point.deltaLen = delta.length();
-		// get tangent matrices
-		for (n = 0; n < point.size - 1; n++)
+		const MVector delta = MVector(src[vertIdx] - smoothed[vertIdx]);
+		pointData.DeltaLength = delta.length();
+
+		// compute tangent matrix and delta in the tangent space
+		const uint32_t neighbourNum = pointData.NeighbourIndices.size();
+		for (uint32_t neighborIdx = 0; neighborIdx < neighbourNum - 1; neighborIdx++)
 		{
-			v1 = target[point.neighbours[n]] - target[i];
-			v2 = target[point.neighbours[n + 1]] - target[i];
+			MMatrix mat = ComputeTangentMatrix(
+				smoothed[vertIdx],
+				smoothed[pointData.NeighbourIndices[neighborIdx]],
+				smoothed[pointData.NeighbourIndices[neighborIdx + 1]]);
 
-			CHECK_MSTATUS(v2.normalize());
-			CHECK_MSTATUS(v1.normalize());
-
-			cross = v1 ^ v2;
-			v2 = cross ^ v1;
-
-			mat = MMatrix();
-			mat[0][0] = v1.x;
-			mat[0][1] = v1.y;
-			mat[0][2] = v1.z;
-			mat[0][3] = 0;
-			mat[1][0] = v2.x;
-			mat[1][1] = v2.y;
-			mat[1][2] = v2.z;
-			mat[1][3] = 0;
-			mat[2][0] = cross.x;
-			mat[2][1] = cross.y;
-			mat[2][2] = cross.z;
-			mat[2][3] = 0;
-			mat[3][0] = 0;
-			mat[3][1] = 0;
-			mat[3][2] = 0;
-			mat[3][3] = 1;
-
-			point.delta[n] = MVector(delta * mat.inverse());
+			// 頂点の tangent space coordinate でデルタを保持する
+			pointData.Delta[neighborIdx] = delta * mat.inverse();
 		}
 	}
-}
-
-void CustomDeltaMushDeformer::rebindData(MObject& mesh, int iter, double amount)
-{
-	// basically resized arrays and backing down neighbours
-	CHECK_MSTATUS(initData(mesh, iter));
-
-	MPointArray posRev, back;
-	MFnMesh meshFn(mesh);
-	CHECK_MSTATUS(meshFn.getPoints(posRev, MSpace::kObject));
-	CHECK_MSTATUS(back.copy(posRev));
-
-	// calling the smooth function
-	averageRelax(mesh, posRev, back, iter, amount);
-
-	// computing the deltas
-	computeDelta(posRev, back);
 }
 
 void* CustomDeltaMushDeformer::creator()
@@ -372,27 +327,8 @@ MStatus CustomDeltaMushDeformer::initialize()
 {
 	MStatus returnStat;
 
-	{
-		//MFnTypedAttribute tAttr;
-		//deltaMushMatrix = tAttr.create("deltaMushMatrix", "dmMat", MFnData::kMatrixArray, MObject::kNullObj, &returnStat);
-		MFnMatrixAttribute mAttr;
-		deltaMushMatrix = mAttr.create("deltaMushMatrix", "dmMat", MFnMatrixAttribute::kDouble, &returnStat);
-		CHECK_MSTATUS(returnStat);
-		CHECK_MSTATUS(mAttr.setArray(true));
-
-		CHECK_MSTATUS(addAttribute(deltaMushMatrix));
-
-		CHECK_MSTATUS(attributeAffects(deltaMushMatrix, outputGeom));
-	}
-
 	MFnTypedAttribute tAttr;
 	MFnNumericAttribute nAttr;
-
-	globalScale = nAttr.create("globalScale", "gls", MFnNumericData::kDouble, 1.0, &returnStat);
-	CHECK_MSTATUS(nAttr.setKeyable(true));
-	CHECK_MSTATUS(nAttr.setStorable(true));
-	CHECK_MSTATUS(nAttr.setMin(0.0001));
-	CHECK_MSTATUS(addAttribute(globalScale));
 
 	rebind = nAttr.create("rebind", "rbn", MFnNumericData::kBoolean, 1, &returnStat);
 	CHECK_MSTATUS(nAttr.setKeyable(true));
@@ -419,7 +355,6 @@ MStatus CustomDeltaMushDeformer::initialize()
 	CHECK_MSTATUS(nAttr.setMax(1));
 	CHECK_MSTATUS(addAttribute(smoothAmount));
 
-	CHECK_MSTATUS(attributeAffects(globalScale, outputGeom));
 	CHECK_MSTATUS(attributeAffects(rebind, outputGeom));
 	CHECK_MSTATUS(attributeAffects(applyDelta, outputGeom));
 	CHECK_MSTATUS(attributeAffects(smoothIterations, outputGeom));

@@ -1,6 +1,6 @@
 #include "InsertDeformerCmd.h"
 #include "CustomDeltaMushDeformer.h"
-#include "PrecomputeCustomSkinningNode.h"
+#include "CustomDeltaMushDeformerOpenCL.h"
 #include <maya/MFnPlugin.h>
 
 
@@ -24,16 +24,18 @@ MStatus initializePlugin(MObject obj)
 	returnStat = plugin.registerNode(CustomDeltaMushDeformer::nodeTypeName, CustomDeltaMushDeformer::id, CustomDeltaMushDeformer::creator, CustomDeltaMushDeformer::initialize, MPxNode::kDeformerNode);
 	if (!returnStat)
 	{
-		returnStat.perror("register customSkinCluster Node failed");
+		returnStat.perror("register customDeltaMush Node failed");
 		return returnStat;
 	}
+	
+	//returnStat = MGPUDeformerRegistry::registerGPUDeformerCreator(CustomDeltaMushGPUDeformer::nodeClassName, CustomDeltaMushGPUDeformer::nodeClassName, CustomDeltaMushGPUDeformer::getGPUDeformerInfo());
+	//if (!returnStat)
+	//{
+	//	returnStat.perror("register GPU override failed");
+	//	return returnStat;
+	//}
 
-	returnStat = plugin.registerNode(PrecomputeCustomSkinningNode::nodeTypeName, PrecomputeCustomSkinningNode::id, PrecomputeCustomSkinningNode::creator, PrecomputeCustomSkinningNode::initialize);
-	if (!returnStat)
-	{
-		returnStat.perror("register precompute Node failed");
-		return returnStat;
-	}
+	CustomDeltaMushDeformer::pluginPath = plugin.loadPath();
 
 	return returnStat;
 }
@@ -55,14 +57,14 @@ MStatus uninitializePlugin(MObject obj)
 		return returnStat;
 	}
 
-	returnStat = plugin.deregisterNode(CustomDeltaMushDeformer::id);
-	if (!returnStat)
-	{
-		returnStat.perror("deregisterNode failed");
-		return returnStat;
-	}
+	//returnStat = MGPUDeformerRegistry::deregisterGPUDeformerCreator(CustomDeltaMushGPUDeformer::nodeClassName, CustomDeltaMushGPUDeformer::nodeClassName);
+	//if (!returnStat)
+	//{
+	//	returnStat.perror("deregister GPU deformer failed");
+	//	return returnStat;
+	//}
 
-	returnStat = plugin.deregisterNode(PrecomputeCustomSkinningNode::id);
+	returnStat = plugin.deregisterNode(CustomDeltaMushDeformer::id);
 	if (!returnStat)
 	{
 		returnStat.perror("deregisterNode failed");

@@ -5,49 +5,54 @@
 #include <maya/MItGeometry.h>
 #include <maya/MMatrix.h>
 #include <maya/MMatrixArray.h>
-#include <maya/MVectorArray.h>
+#include <maya/MVector.h>
 #include <maya/MPointArray.h>
 #include <vector>
-
-struct point_data
-{
-	MIntArray neighbours;
-	MVectorArray delta;
-	int size;
-	double deltaLen;
-};
 
 class CustomDeltaMushDeformer : public MPxDeformerNode
 {
 public:
-	CustomDeltaMushDeformer();
+	CustomDeltaMushDeformer() = default;
+	~CustomDeltaMushDeformer() = default;
 
-	MStatus compute(const MPlug& plug, MDataBlock& data) override;
+	MStatus InitializeData(MObject& mesh);
+	MStatus InitializeData(MObject& mesh, uint32_t smoothingIter, double smoothingAmount);
+	void ApplyDeltaMush(const std::vector<MPoint>& skinned, std::vector<MPoint>& deformed, double envelope, double applyDeltaAmount) const;
+	void SetSmoothingData(uint32_t iter, double amount);
+
 	MStatus deform(MDataBlock& data, MItGeometry& iter, const MMatrix& l2w, unsigned int multiIdx) override;
 	static void* creator();
 	static MStatus initialize();
 
-public:
-	static MObject deltaMushMatrix;
-
 	static MTypeId id;
-
 	inline static const MString nodeTypeName = "customDeltaMushDeformer";
+	static MString pluginPath; ///< path where the loaded plugin exists
 
-public:
+	// custom attributes
 	static MObject rebind;
 	static MObject smoothIterations;
 	static MObject applyDelta;
 	static MObject smoothAmount;
-	static MObject globalScale;
 
 private:
-	MPointArray targetPos;
-	std::vector<point_data> dataPoints;
-	bool initialized;
+	// data used to compute DeltaMush for each point
+	struct PointData
+	{
+		std::vector<int32_t> NeighbourIndices; ///< indices of neighbouring points
+		double DeltaLength = 0.0;              ///< distance b/w original pos and smoothed pos
+		std::vector<MVector> Delta;            ///< delta computed in tangent space of triangles with neighbouring points
+	};
 
-	MStatus initData(MObject& mesh, int iters);
-	void averageRelax(MObject& mesh, const MPointArray& source, MPointArray& target, int smoothIter, double smoothAmount);
-	void computeDelta(MPointArray& source, MPointArray& target);
-	void rebindData(MObject& mesh, int iter, double amount);
+	// parameters for laplacian smoothing
+	struct SmoothingData {
+		uint32_t Iter = 0;   ///< smooth iterations
+		double Amount = 1.0; ///< smoothing amount [0.0 ~ 1.0]
+	};
+
+	std::vector<PointData> m_pointData;
+	bool m_isInitialized = false;
+	SmoothingData m_smoothingData;
+
+	void ComputeSmoothedPoints(const std::vector<MPoint>& src, std::vector<MPoint>& smoothed) const;
+	void ComputeDelta(const std::vector<MPoint>& src, const std::vector<MPoint>& smoothed);
 };

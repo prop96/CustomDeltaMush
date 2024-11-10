@@ -1,6 +1,5 @@
 #include "InsertDeformerCmd.h"
 #include "CustomDeltaMushDeformer.h"
-#include "PrecomputeCustomSkinningNode.h"
 #include <maya/MSelectionList.h>
 #include <maya/MGlobal.h>
 #include <maya/MDagPath.h>
@@ -65,19 +64,14 @@ MStatus InsertDeformerCmd::InsertNode()
 		MFnSkinCluster skclFn(skclObj);
 
 		// create the new node to insert
-		MObject precomputer = m_dgMod.createNode(PrecomputeCustomSkinningNode::nodeTypeName, &returnStat);
-		CHECK_MSTATUS(returnStat);
-		MFnDependencyNode precompFn(precomputer);
 		MObject newDeformer = m_dgMod.createNode(CustomDeltaMushDeformer::nodeTypeName, &returnStat);
 		CHECK_MSTATUS(returnStat);
 		MFnDependencyNode deformerFn(newDeformer);
 
 		// connect
-		CHECK_MSTATUS(ConnectSameAttribute("deltaMushMatrix", precompFn, deformerFn));
 		CHECK_MSTATUS(ConnectSameAttribute("weightList", skclFn, deformerFn));
 		CHECK_MSTATUS(ConnectSameAttribute("originalGeometry[0]", skclFn, deformerFn));
 		CHECK_MSTATUS(ReplaceConnection("outputGeometry[0]", skclFn, deformerFn, false));
-		CHECK_MSTATUS(ConnectAttribute("originalGeometry[0]", skclFn, "originalGeometry", precompFn));
 		CHECK_MSTATUS(ConnectAttribute("outputGeometry[0]", skclFn, "input[0].inputGeometry", deformerFn));
 	}
 
