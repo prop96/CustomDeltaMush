@@ -1,6 +1,6 @@
 #include "InsertDeformerCmd.h"
 #include "CustomDeltaMushDeformer.h"
-#include "CustomDeltaMushDeformerOpenCL.h"
+#include "CustomDeltaMushGPUDeformer.h"
 #include <maya/MFnPlugin.h>
 
 
