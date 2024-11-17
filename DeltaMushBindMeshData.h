@@ -12,7 +12,7 @@ public:
 	void SetSmoothingData(uint32_t iter, double amount);
 	const SmoothingData& GetSmoothingData() const;
 
-	void SetPointData(MObject& mesh);
+	void SetBindMeshData(MObject& mesh);
 	const std::vector<PointData>& GetPointData() const;
 
 	bool IsInitialized() const;

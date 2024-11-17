@@ -4,6 +4,7 @@
 #include <maya/MDistance.h>
 #include <maya/MPoint.h>
 #include <maya/MItMeshVertex.h>
+#include <maya/MItGeometry.h>
 #include <maya/MPointArray.h>
 #include <maya/MFnTypedAttribute.h>
 #include <maya/MFnMatrixArrayData.h>
@@ -31,8 +32,8 @@ MStatus CustomDeltaMushDeformer::deform(MDataBlock& data, MItGeometry& iter, con
 
 	// set smoothing property
 	{
-		int32_t iterationsVal = data.inputValue(smoothIterations).asInt();
-		double amountVal = data.inputValue(smoothAmount).asDouble();
+		const int32_t iterationsVal = data.inputValue(smoothIterations).asInt();
+		const double amountVal = data.inputValue(smoothAmount).asDouble();
 		m_bindMeshData.SetSmoothingData(iterationsVal, amountVal);
 	}
 
@@ -53,12 +54,12 @@ MStatus CustomDeltaMushDeformer::deform(MDataBlock& data, MItGeometry& iter, con
 	{
 		// bind the original mesh
 		MObject originalGeomVal = data.inputArrayValue(origGeom, &returnStat).inputValue().asMesh();
-		m_bindMeshData.SetPointData(originalGeomVal);
+		m_bindMeshData.SetBindMeshData(originalGeomVal);
 		data.inputValue(rebind).setBool(false);
 	}
 
 	// noting to do if envelop is zero
-	double envelopeVal = static_cast<double>(data.inputValue(envelope).asFloat());
+	const double envelopeVal = static_cast<double>(data.inputValue(envelope).asFloat());
 	if (envelopeVal < Eps)
 	{
 		return MS::kSuccess;
@@ -67,7 +68,7 @@ MStatus CustomDeltaMushDeformer::deform(MDataBlock& data, MItGeometry& iter, con
 	// apply delta mush
 	std::vector<MPoint> finalPos;
 	{
-		double applyDeltaVal = data.inputValue(applyDelta).asDouble();
+		const double applyDeltaVal = data.inputValue(applyDelta).asDouble();
 
 		std::vector<MPoint> initPos;
 		{
@@ -98,16 +99,16 @@ void CustomDeltaMushDeformer::ApplyDeltaMush(const std::vector<MPoint>& skinned,
 	const uint32_t numVerts = skinned.size();
 	deformed.resize(numVerts);
 
-	auto& pointDataArray = m_bindMeshData.GetPointData();
+	auto& bindMeshPointData = m_bindMeshData.GetPointData();
 
 	// compute mush
 	std::vector<MPoint> mushed;
-	DMUtil::ComputeSmoothedPoints(skinned, mushed, m_bindMeshData.GetSmoothingData(), pointDataArray);
+	DMUtil::ComputeSmoothedPoints(skinned, mushed, m_bindMeshData.GetSmoothingData(), bindMeshPointData);
 
 	// apply delta to mush
 	for (uint32_t vertIdx = 0; vertIdx < numVerts; vertIdx++)
 	{
-		const PointData& pointData = pointDataArray[vertIdx];
+		const PointData& pointData = bindMeshPointData[vertIdx];
 
 		// compute delta in animated pose
 		MVector delta = MVector::zero;

@@ -18,7 +18,7 @@ const SmoothingData& DeltaMushBindMeshData::GetSmoothingData() const
 	return m_smoothingData;
 }
 
-void DeltaMushBindMeshData::SetPointData(MObject& mesh)
+void DeltaMushBindMeshData::SetBindMeshData(MObject& mesh)
 {
 	MStatus stat;
 

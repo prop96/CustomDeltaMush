@@ -22,10 +22,6 @@ struct SmoothingData {
 namespace DMUtil
 {
 	MStatus SmoothMesh(MObject& mesh, const MPointArray& original, MPointArray& smoothed, int smoothItr, double smoothAmount);
-	MStatus SmoothVertex(MPoint& smoothed, MItMeshVertex& itVertex, const MPointArray& points);
-	MStatus SmoothVertex(MPoint& smoothed, const MPoint& original, const MIntArray& connected, const MPointArray& points);
-	MStatus CreateDeltaMushMatrix(MObject& mesh, MMatrixArray& matrixArray);
-	MStatus CreateDeltaMushMatrix(MMatrix& matrix, MItMeshVertex& itVertex, const MFnMesh& meshFn, const MPointArray& points);
 
 	void ComputeSmoothedPoints(const std::vector<MPoint>& src, std::vector<MPoint>& smoothed, const SmoothingData& smoothingData, const std::vector<PointData>& pointDataArray);
 

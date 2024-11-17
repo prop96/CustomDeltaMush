@@ -1,6 +1,7 @@
 #pragma once
 
 #include "OpenCLKernel.h"
+#include "DeltaMushBindMeshData.h"
 #include <maya/MPxGPUDeformer.h>
 #include <maya/MGPUDeformerRegistry.h>
 #include <maya/MDataBlock.h>
@@ -18,8 +19,6 @@ public:
 	static bool validateNodeInGraph(MDataBlock& block, const MEvaluationNode&, const MPlug& plug, MStringArray* messages);
 	static bool validateNodeValues(MDataBlock& block, const MEvaluationNode&, const MPlug& plug, MStringArray* messages);
 
-	inline static const MString nodeClassName = "customDeltaMushGPU";
-
 	CustomDeltaMushGPUDeformer() = default;
 	~CustomDeltaMushGPUDeformer() override;
 
@@ -34,6 +33,8 @@ public:
 		MGPUDeformerData& outputData) override;
 
 private:
+	DeltaMushBindMeshData m_bindMeshData;
+
 	OpenCLKernel m_smoothingKernel;
 	OpenCLKernel m_applyDeltaKernel;
 	int32_t m_size = 0;

@@ -50,15 +50,17 @@ void CustomDeltaMushGPUDeformer::terminate()
 MPxGPUDeformer::DeformerStatus CustomDeltaMushGPUDeformer::evaluate(
 	MDataBlock& block,
 	const MEvaluationNode& evaluationNode,
-	const MPlug& plug,
+	const MPlug& outputPlug,
 	const MPlugArray& inputPlugs,
 	const MGPUDeformerData& inputData,
 	MGPUDeformerData& outputData)
 {
+	MStatus returnStat;
+
 	// get inputPositions from input mesh
 	{
 		const uint32_t numPlugs = inputPlugs.length();
-		assert(numPlugs == 0);
+		assert(numPlugs == 1);
 	}
 	const MPlug& inputPlug = inputPlugs[0];
 	const MGPUDeformerBuffer inputPositions = inputData.getBuffer(MPxGPUDeformer::sPositionsName(), inputPlug);
@@ -69,23 +71,46 @@ MPxGPUDeformer::DeformerStatus CustomDeltaMushGPUDeformer::evaluate(
 
 	// create outputPositions buffer
 	MGPUDeformerBuffer outputPositions = createOutputBuffer(inputPositions);
-	if (outputPositions.isValid())
+	if (!outputPositions.isValid())
 	{
 		return kDeformerFailure;
 	}
 
-	// Getting needed data
-	double applyDeltaV = block.inputValue(CustomDeltaMushDeformer::applyDelta).asDouble();
-	double amountV = block.inputValue(CustomDeltaMushDeformer::smoothAmount).asDouble();
-	bool rebintV = block.inputValue(CustomDeltaMushDeformer::rebind).asBool();
-
-	const int32_t iterationsVal = block.inputValue(CustomDeltaMushDeformer::smoothIterations).asInt();
-
-	// nothing to do if no smoothing
-	if (iterationsVal == 0)
+	// set smoothing property
 	{
-		return kDeformerSuccess;
+		const int32_t iterationsVal = block.inputValue(CustomDeltaMushDeformer::smoothIterations).asInt();
+		const double amountVal = block.inputValue(CustomDeltaMushDeformer::smoothAmount).asDouble();
+		m_bindMeshData.SetSmoothingData(iterationsVal, amountVal);
+
+		// nothing to do if no smoothing
+		if (iterationsVal <= 0)
+		{
+			return kDeformerSuccess;
+		}
 	}
+
+	// error if originalGeometry attribute is not connected
+	MObject thisMObject = evaluationNode.dependencyNode(&returnStat);
+	MFnDependencyNode thisNode(thisMObject);
+	MObject origGeom = thisNode.attribute("originalGeometry", &returnStat);
+	if (MPlug refMeshPlug(thisMObject, origGeom); !refMeshPlug.elementByLogicalIndex(0).isConnected(&returnStat))
+	{
+		returnStat.perror("mesh to bind is not connected");
+		return MPxGPUDeformer::DeformerStatus::kDeformerFailure;
+	}
+
+	// initialize data for the mesh to bind if still not
+	if (!m_bindMeshData.IsInitialized())
+	{
+		// bind the original mesh
+		MObject origGeomVal = block.inputArrayValue(origGeom, &returnStat).inputValue().asMesh();
+		m_bindMeshData.SetBindMeshData(origGeomVal);
+
+		block.inputValue(CustomDeltaMushDeformer::rebind).setBool(false);
+	}
+
+	// Getting needed data
+	const double applyDeltaVal = block.inputValue(CustomDeltaMushDeformer::applyDelta).asDouble();
 
 
 	// # of vertices?
@@ -109,7 +134,7 @@ MPxGPUDeformer::DeformerStatus CustomDeltaMushGPUDeformer::evaluate(
 
 	{
 		// init data builds the neighbour table and we are going to upload it
-		MObject referenceMeshV = block.inputValue(CustomDeltaMushDeformer::outputGeom).data();
+		//MObject referenceMeshV = block.inputValue(CustomDeltaMushDeformer::outputGeom).data();
 
 		int size = numElements;
 		m_size = size;
@@ -158,7 +183,8 @@ MPxGPUDeformer::DeformerStatus CustomDeltaMushGPUDeformer::evaluate(
 
 	cl_event inEvent;
 	cl_event outEvent;
-	for (int i = 0; i < iterationsVal; i++)
+	auto& smoothingData = m_bindMeshData.GetSmoothingData();
+	for (int idx = 0; idx <  smoothingData.Iter; idx++)
 	{
 		// Swap src and trg
 		{
@@ -167,7 +193,7 @@ MPxGPUDeformer::DeformerStatus CustomDeltaMushGPUDeformer::evaluate(
 			trg = tmpPtr;
 		}
 
-		if (i == 1)
+		if (idx == 1)
 		{
 			trg = (void*)&m_tmpBuffer1;
 		}
@@ -180,15 +206,15 @@ MPxGPUDeformer::DeformerStatus CustomDeltaMushGPUDeformer::evaluate(
 		MOpenCLInfo::checkCLErrorStatus(err);
 		err = clSetKernelArg(m_smoothingKernel.Get(), parameterId++, sizeof(cl_mem), src);
 		MOpenCLInfo::checkCLErrorStatus(err);
-		err = clSetKernelArg(m_smoothingKernel.Get(), parameterId++, sizeof(cl_float), (void*)&amountV);
+		err = clSetKernelArg(m_smoothingKernel.Get(), parameterId++, sizeof(cl_float), (void*)&smoothingData.Amount);
 		MOpenCLInfo::checkCLErrorStatus(err);
-		err = clSetKernelArg(m_smoothingKernel.Get(), parameterId++, sizeof(cl_uint), (void*)&i);
+		err = clSetKernelArg(m_smoothingKernel.Get(), parameterId++, sizeof(cl_uint), (void*)&idx);
 		MOpenCLInfo::checkCLErrorStatus(err);
 		err = clSetKernelArg(m_smoothingKernel.Get(), parameterId++, sizeof(cl_uint), (void*)&numElements);
 		MOpenCLInfo::checkCLErrorStatus(err);
 
 		// Run the Kernel
-		if (i == 0)
+		if (idx == 0)
 		{
 			err = m_smoothingKernel.Run(events, &outEvent);
 			inEvent = events[0];

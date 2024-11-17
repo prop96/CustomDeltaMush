@@ -28,12 +28,12 @@ MStatus initializePlugin(MObject obj)
 		return returnStat;
 	}
 	
-	//returnStat = MGPUDeformerRegistry::registerGPUDeformerCreator(CustomDeltaMushGPUDeformer::nodeClassName, CustomDeltaMushGPUDeformer::nodeClassName, CustomDeltaMushGPUDeformer::getGPUDeformerInfo());
-	//if (!returnStat)
-	//{
-	//	returnStat.perror("register GPU override failed");
-	//	return returnStat;
-	//}
+	returnStat = MGPUDeformerRegistry::registerGPUDeformerCreator(CustomDeltaMushDeformer::nodeTypeName, CustomDeltaMushDeformer::nodeTypeName, CustomDeltaMushGPUDeformer::getGPUDeformerInfo());
+	if (!returnStat)
+	{
+		returnStat.perror("register GPU override failed");
+		return returnStat;
+	}
 
 	CustomDeltaMushDeformer::pluginPath = plugin.loadPath();
 
@@ -57,12 +57,12 @@ MStatus uninitializePlugin(MObject obj)
 		return returnStat;
 	}
 
-	//returnStat = MGPUDeformerRegistry::deregisterGPUDeformerCreator(CustomDeltaMushGPUDeformer::nodeClassName, CustomDeltaMushGPUDeformer::nodeClassName);
-	//if (!returnStat)
-	//{
-	//	returnStat.perror("deregister GPU deformer failed");
-	//	return returnStat;
-	//}
+	returnStat = MGPUDeformerRegistry::deregisterGPUDeformerCreator(CustomDeltaMushDeformer::nodeTypeName, CustomDeltaMushDeformer::nodeTypeName);
+	if (!returnStat)
+	{
+		returnStat.perror("deregister GPU deformer failed");
+		return returnStat;
+	}
 
 	returnStat = plugin.deregisterNode(CustomDeltaMushDeformer::id);
 	if (!returnStat)
