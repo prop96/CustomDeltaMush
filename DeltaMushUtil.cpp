@@ -35,7 +35,11 @@ namespace DMUtil
 		return MS::kSuccess;
 	}
 
-	void ComputeSmoothedPoints(const std::vector<MPoint>& src, std::vector<MPoint>& smoothed, const SmoothingData& smoothingData, const std::vector<PointData>& pointDataArray)
+	void ComputeSmoothedPoints(
+		const std::vector<MPoint>& src,
+		std::vector<MPoint>& smoothed,
+		const SmoothingData& smoothingData,
+		const std::vector<std::vector<int32_t>>& neighbourIndicesAll)
 	{
 #if 0
 		// verify Laplacian Smoothing
@@ -55,15 +59,15 @@ namespace DMUtil
 
 			for (uint32_t vertIdx = 0; vertIdx < numVerts; vertIdx++)
 			{
-				const PointData& pointData = pointDataArray[vertIdx];
+				const std::vector<int32_t>& neighbourVertexIndices = neighbourIndicesAll[vertIdx];
 
 				// 隣接頂点の平均としてスムージング
 				MVector smoothedPos = MVector::zero;
-				for (const int neighbourIdx : pointData.NeighbourIndices)
+				for (const int neighbourIdx : neighbourVertexIndices)
 				{
 					smoothedPos += srcCopy[neighbourIdx];
 				}
-				smoothedPos *= 1.0 / double(pointData.NeighbourIndices.size());
+				smoothedPos *= 1.0 / double(neighbourVertexIndices.size());
 
 				smoothed[vertIdx] = srcCopy[vertIdx] + (smoothedPos - srcCopy[vertIdx]) * smoothingData.Amount;
 			}

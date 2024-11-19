@@ -22,28 +22,24 @@ void DeltaMushBindMeshData::SetBindMeshData(MObject& mesh)
 {
 	MStatus stat;
 
-	// 頂点ごとのデータ配列を初期化
-	m_pointData.clear();
+	MItMeshVertex iter(mesh);
+	const uint32_t numVertices = iter.count();
+
+	m_neighbourIndices.resize(numVertices);
 
 	// 頂点の隣接情報を格納
-	MItMeshVertex iter(mesh);
 	for (iter.reset(); !iter.isDone(); iter.next())
 	{
-		PointData pd;
+		const int32_t idx = iter.index();
 
 		// 隣接頂点インデックスを取得
 		MIntArray neighborIndices;
 		iter.getConnectedVertices(neighborIndices);
-		const uint32_t neighbourNum = neighborIndices.length();
+		const uint32_t numNeighbour = neighborIndices.length();
 
-		// PointData に格納
-		pd.NeighbourIndices.resize(neighbourNum);
-		neighborIndices.get(pd.NeighbourIndices.data());
-
-		// 隣接頂点ごとの delta を保持する配列を初期化
-		pd.Delta.resize(neighbourNum - 1);
-
-		m_pointData.push_back(pd);
+		// private field に格納
+		m_neighbourIndices[idx].resize(numNeighbour);
+		neighborIndices.get(m_neighbourIndices[idx].data());
 	}
 
 	MFnMesh meshFn(mesh);
@@ -58,7 +54,7 @@ void DeltaMushBindMeshData::SetBindMeshData(MObject& mesh)
 
 	// Smoothing 処理 (posSmoothed を計算)
 	std::vector<MPoint> posSmoothed;
-	DMUtil::ComputeSmoothedPoints(posOriginal, posSmoothed, m_smoothingData, m_pointData);
+	DMUtil::ComputeSmoothedPoints(posOriginal, posSmoothed, m_smoothingData, m_neighbourIndices);
 
 	// Delta を計算して m_pointData に格納
 	ComputeDelta(posOriginal, posSmoothed);
@@ -68,9 +64,19 @@ void DeltaMushBindMeshData::SetBindMeshData(MObject& mesh)
 	//return stat;
 }
 
-const std::vector<PointData>& DeltaMushBindMeshData::GetPointData() const
+const std::vector<std::vector<int32_t>>& DeltaMushBindMeshData::GetNeighbourIndices() const
 {
-	return m_pointData;
+	return m_neighbourIndices;
+}
+
+const std::vector<float>& DeltaMushBindMeshData::GetDeltaLength() const
+{
+	return m_deltaLength;
+}
+
+const std::vector<std::vector<MVector>>& DeltaMushBindMeshData::GetDelta() const
+{
+	return m_delta;
 }
 
 bool DeltaMushBindMeshData::IsInitialized() const
@@ -80,27 +86,30 @@ bool DeltaMushBindMeshData::IsInitialized() const
 
 void DeltaMushBindMeshData::ComputeDelta(const std::vector<MPoint>& src, const std::vector<MPoint>& smoothed)
 {
-	const uint32_t numVerts = src.size();
+	const uint32_t numVertices = src.size();
+	m_delta.resize(numVertices);
+	m_deltaLength.resize(numVertices);
 
 	// 各頂点ごとにデルタを計算
-	for (uint32_t vertIdx = 0; vertIdx < numVerts; vertIdx++)
+	for (uint32_t vertIdx = 0; vertIdx < numVertices; vertIdx++)
 	{
-		PointData& pointData = m_pointData[vertIdx];
-
 		const MVector delta = MVector(src[vertIdx] - smoothed[vertIdx]);
-		pointData.DeltaLength = delta.length();
+		m_deltaLength[vertIdx] = delta.length();
+
+		// 隣接頂点ごとの delta を保持する配列を初期化
+		const uint32_t numNeighbour = m_neighbourIndices[vertIdx].size();
+		m_delta[vertIdx].resize(numNeighbour - 1);
 
 		// compute tangent matrix and delta in the tangent space
-		const uint32_t neighbourNum = pointData.NeighbourIndices.size();
-		for (uint32_t neighborIdx = 0; neighborIdx < neighbourNum - 1; neighborIdx++)
+		for (uint32_t neighborIdx = 0; neighborIdx < numNeighbour - 1; neighborIdx++)
 		{
 			MMatrix mat = DMUtil::ComputeTangentMatrix(
 				smoothed[vertIdx],
-				smoothed[pointData.NeighbourIndices[neighborIdx]],
-				smoothed[pointData.NeighbourIndices[neighborIdx + 1]]);
+				smoothed[m_neighbourIndices[vertIdx][neighborIdx]],
+				smoothed[m_neighbourIndices[vertIdx][neighborIdx + 1]]);
 
 			// 頂点の tangent space coordinate でデルタを保持する
-			pointData.Delta[neighborIdx] = delta * mat.inverse();
+			m_delta[vertIdx][neighborIdx] = delta * mat.inverse();
 		}
 	}
 }
