@@ -124,7 +124,7 @@ void CustomDeltaMushDeformer::ApplyDeltaMush(const std::vector<MPoint>& skinned,
 				mushed[neighbourIndices[neighborIdx]],
 				mushed[neighbourIndices[neighborIdx + 1]]);
 
-			delta += deltaAll[vertIdx][neighborIdx] * mat;
+			delta += MVector(deltaAll[vertIdx][neighborIdx].data()) * mat;
 		}
 		delta /= static_cast<double>(neighbourNum);
 

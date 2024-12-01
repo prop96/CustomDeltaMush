@@ -74,7 +74,7 @@ const std::vector<float>& DeltaMushBindMeshData::GetDeltaLength() const
 	return m_deltaLength;
 }
 
-const std::vector<std::vector<MVector>>& DeltaMushBindMeshData::GetDelta() const
+const std::vector<std::vector<std::array<float, 3>>>& DeltaMushBindMeshData::GetDelta() const
 {
 	return m_delta;
 }
@@ -109,7 +109,10 @@ void DeltaMushBindMeshData::ComputeDelta(const std::vector<MPoint>& src, const s
 				smoothed[m_neighbourIndices[vertIdx][neighborIdx + 1]]);
 
 			// ’¸“_‚Ì tangent space coordinate ‚Åƒfƒ‹ƒ^‚ğ•Û‚·‚é
-			m_delta[vertIdx][neighborIdx] = delta * mat.inverse();
+			auto deltaTangentSpace = delta * mat.inverse();
+			m_delta[vertIdx][neighborIdx][0] = deltaTangentSpace.x;
+			m_delta[vertIdx][neighborIdx][1] = deltaTangentSpace.y;
+			m_delta[vertIdx][neighborIdx][2] = deltaTangentSpace.z;
 		}
 	}
 }
