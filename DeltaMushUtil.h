@@ -14,7 +14,12 @@ namespace DMUtil
 {
 	MStatus SmoothMesh(MObject& mesh, const MPointArray& original, MPointArray& smoothed, int smoothItr, double smoothAmount);
 
-	void ComputeSmoothedPoints(const std::vector<MPoint>& src, std::vector<MPoint>& smoothed, const SmoothingData& smoothingData, const std::vector<std::vector<int32_t>>& neighbourIndicesAll);
+	void ComputeSmoothedPoints(
+		const std::vector<MPoint>& src,
+		std::vector<MPoint>& smoothed,
+		const SmoothingData& smoothingData,
+		const std::vector<uint32_t>& startIndices,
+		const std::vector<int32_t>& neighbourIndices);
 
 	MMatrix ComputeTangentMatrix(const MPoint& pos, const MPoint& posNeighbor0, const MPoint& posNeighbor1);
 

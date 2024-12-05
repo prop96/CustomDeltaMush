@@ -39,7 +39,8 @@ namespace DMUtil
 		const std::vector<MPoint>& src,
 		std::vector<MPoint>& smoothed,
 		const SmoothingData& smoothingData,
-		const std::vector<std::vector<int32_t>>& neighbourIndicesAll)
+		const std::vector<uint32_t>& startIndices,
+		const std::vector<int32_t>& neighbourIndices)
 	{
 #if 0
 		// verify Laplacian Smoothing
@@ -59,15 +60,16 @@ namespace DMUtil
 
 			for (uint32_t vertIdx = 0; vertIdx < numVerts; vertIdx++)
 			{
-				const std::vector<int32_t>& neighbourVertexIndices = neighbourIndicesAll[vertIdx];
+				const uint32_t startIdx = startIndices[vertIdx];
+				const uint32_t numNeighbours = startIndices[vertIdx + 1] - startIdx;
 
 				// 隣接頂点の平均としてスムージング
 				MVector smoothedPos = MVector::zero;
-				for (const int neighbourIdx : neighbourVertexIndices)
+				for (uint32_t nIdx = 0; nIdx < numNeighbours; nIdx++)
 				{
-					smoothedPos += srcCopy[neighbourIdx];
+					smoothedPos += srcCopy[neighbourIndices[startIdx + nIdx]];
 				}
-				smoothedPos *= 1.0 / double(neighbourVertexIndices.size());
+				smoothedPos *= 1.0 / double(numNeighbours);
 
 				smoothed[vertIdx] = srcCopy[vertIdx] + (smoothedPos - srcCopy[vertIdx]) * smoothingData.Amount;
 			}

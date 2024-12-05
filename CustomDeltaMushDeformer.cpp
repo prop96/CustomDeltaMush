@@ -99,13 +99,14 @@ void CustomDeltaMushDeformer::ApplyDeltaMush(const std::vector<MPoint>& skinned,
 	const uint32_t numVerts = skinned.size();
 	deformed.resize(numVerts);
 
-	auto& neighbourIndicesAll = m_bindMeshData.GetNeighbourIndices();
+	auto& startIndices = m_bindMeshData.GetStartIndexNeighbourIndices();
+	auto& neighbourIndices = m_bindMeshData.GetNeighbourIndices();
 	auto& deltaLengthAll = m_bindMeshData.GetDeltaLength();
 	auto& deltaAll = m_bindMeshData.GetDelta();
 
 	// compute mush
 	std::vector<MPoint> mushed;
-	DMUtil::ComputeSmoothedPoints(skinned, mushed, m_bindMeshData.GetSmoothingData(), neighbourIndicesAll);
+	DMUtil::ComputeSmoothedPoints(skinned, mushed, m_bindMeshData.GetSmoothingData(), startIndices, neighbourIndices);
 
 	// apply delta to mush
 	for (uint32_t vertIdx = 0; vertIdx < numVerts; vertIdx++)
@@ -113,16 +114,15 @@ void CustomDeltaMushDeformer::ApplyDeltaMush(const std::vector<MPoint>& skinned,
 		// compute delta in animated pose
 		MVector delta = MVector::zero;
 
-		auto& neighbourIndices = neighbourIndicesAll[vertIdx];
-
 		// looping the neighbours
-		const uint32_t neighbourNum = neighbourIndices.size();
+		const uint32_t startIdx = startIndices[vertIdx];
+		const uint32_t neighbourNum = startIndices[vertIdx + 1] - startIdx;
 		for (uint32_t neighborIdx = 0; neighborIdx < neighbourNum - 1; neighborIdx++)
 		{
 			MMatrix mat = DMUtil::ComputeTangentMatrix(
 				mushed[vertIdx],
-				mushed[neighbourIndices[neighborIdx]],
-				mushed[neighbourIndices[neighborIdx + 1]]);
+				mushed[neighbourIndices[startIdx + neighborIdx]],
+				mushed[neighbourIndices[startIdx + neighborIdx + 1]]);
 
 			delta += MVector(deltaAll[vertIdx][neighborIdx].data()) * mat;
 		}

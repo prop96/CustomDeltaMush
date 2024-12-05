@@ -25,7 +25,8 @@ void DeltaMushBindMeshData::SetBindMeshData(MObject& mesh)
 	MItMeshVertex iter(mesh);
 	const uint32_t numVertices = iter.count();
 
-	m_neighbourIndices.resize(numVertices);
+	m_neighbourIndices.clear();
+	m_startIndexNeighbourIndices.resize(numVertices + 1);
 
 	// ’¸“_‚Ì—×Úî•ñ‚ğŠi”[
 	for (iter.reset(); !iter.isDone(); iter.next())
@@ -38,8 +39,11 @@ void DeltaMushBindMeshData::SetBindMeshData(MObject& mesh)
 		const uint32_t numNeighbour = neighborIndices.length();
 
 		// private field ‚ÉŠi”[
-		m_neighbourIndices[idx].resize(numNeighbour);
-		neighborIndices.get(m_neighbourIndices[idx].data());
+		for (uint32_t nIdx = 0; nIdx < numNeighbour; nIdx++)
+		{
+			m_neighbourIndices.push_back(neighborIndices[nIdx]);
+		}
+		m_startIndexNeighbourIndices[idx + 1] = m_startIndexNeighbourIndices[idx] + numNeighbour;
 	}
 
 	MFnMesh meshFn(mesh);
@@ -54,7 +58,7 @@ void DeltaMushBindMeshData::SetBindMeshData(MObject& mesh)
 
 	// Smoothing ˆ— (posSmoothed ‚ğŒvZ)
 	std::vector<MPoint> posSmoothed;
-	DMUtil::ComputeSmoothedPoints(posOriginal, posSmoothed, m_smoothingData, m_neighbourIndices);
+	DMUtil::ComputeSmoothedPoints(posOriginal, posSmoothed, m_smoothingData, m_startIndexNeighbourIndices, m_neighbourIndices);
 
 	// Delta ‚ğŒvZ‚µ‚Ä m_pointData ‚ÉŠi”[
 	ComputeDelta(posOriginal, posSmoothed);
@@ -64,7 +68,7 @@ void DeltaMushBindMeshData::SetBindMeshData(MObject& mesh)
 	//return stat;
 }
 
-const std::vector<std::vector<int32_t>>& DeltaMushBindMeshData::GetNeighbourIndices() const
+const std::vector<int32_t>& DeltaMushBindMeshData::GetNeighbourIndices() const
 {
 	return m_neighbourIndices;
 }
@@ -77,6 +81,11 @@ const std::vector<float>& DeltaMushBindMeshData::GetDeltaLength() const
 const std::vector<std::vector<std::array<float, 3>>>& DeltaMushBindMeshData::GetDelta() const
 {
 	return m_delta;
+}
+
+const std::vector<uint32_t>& DeltaMushBindMeshData::GetStartIndexNeighbourIndices() const
+{
+	return m_startIndexNeighbourIndices;
 }
 
 bool DeltaMushBindMeshData::IsInitialized() const
@@ -97,7 +106,8 @@ void DeltaMushBindMeshData::ComputeDelta(const std::vector<MPoint>& src, const s
 		m_deltaLength[vertIdx] = delta.length();
 
 		// —×Ú’¸“_‚²‚Æ‚Ì delta ‚ğ•Û‚·‚é”z—ñ‚ğ‰Šú‰»
-		const uint32_t numNeighbour = m_neighbourIndices[vertIdx].size();
+		const uint32_t startIdx = m_startIndexNeighbourIndices[vertIdx];
+		const uint32_t numNeighbour = m_startIndexNeighbourIndices[vertIdx + 1] - startIdx;
 		m_delta[vertIdx].resize(numNeighbour - 1);
 
 		// compute tangent matrix and delta in the tangent space
@@ -105,8 +115,8 @@ void DeltaMushBindMeshData::ComputeDelta(const std::vector<MPoint>& src, const s
 		{
 			MMatrix mat = DMUtil::ComputeTangentMatrix(
 				smoothed[vertIdx],
-				smoothed[m_neighbourIndices[vertIdx][neighborIdx]],
-				smoothed[m_neighbourIndices[vertIdx][neighborIdx + 1]]);
+				smoothed[m_neighbourIndices[startIdx + neighborIdx]],
+				smoothed[m_neighbourIndices[startIdx + neighborIdx + 1]]);
 
 			// ’¸“_‚Ì tangent space coordinate ‚Åƒfƒ‹ƒ^‚ğ•Û‚·‚é
 			auto deltaTangentSpace = delta * mat.inverse();
