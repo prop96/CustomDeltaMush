@@ -31,7 +31,7 @@ void DeltaMushBindMeshData::SetBindMeshData(MObject& mesh)
 	// 頂点の隣接情報を格納
 	for (iter.reset(); !iter.isDone(); iter.next())
 	{
-		const int32_t idx = iter.index();
+		const int32_t vIdx = iter.index();
 
 		// 隣接頂点インデックスを取得
 		MIntArray neighborIndices;
@@ -43,7 +43,7 @@ void DeltaMushBindMeshData::SetBindMeshData(MObject& mesh)
 		{
 			m_neighbourIndices.push_back(neighborIndices[nIdx]);
 		}
-		m_startIndexNeighbourIndices[idx + 1] = m_startIndexNeighbourIndices[idx] + numNeighbour;
+		m_startIndexNeighbourIndices[vIdx + 1] = m_startIndexNeighbourIndices[vIdx] + numNeighbour;
 	}
 
 	MFnMesh meshFn(mesh);
@@ -78,7 +78,7 @@ const std::vector<float>& DeltaMushBindMeshData::GetDeltaLength() const
 	return m_deltaLength;
 }
 
-const std::vector<std::vector<std::array<float, 3>>>& DeltaMushBindMeshData::GetDelta() const
+const std::vector<std::array<float, 3>>& DeltaMushBindMeshData::GetDelta() const
 {
 	return m_delta;
 }
@@ -96,7 +96,7 @@ bool DeltaMushBindMeshData::IsInitialized() const
 void DeltaMushBindMeshData::ComputeDelta(const std::vector<MPoint>& src, const std::vector<MPoint>& smoothed)
 {
 	const uint32_t numVertices = src.size();
-	m_delta.resize(numVertices);
+	m_delta.resize(m_startIndexNeighbourIndices[numVertices] - numVertices);
 	m_deltaLength.resize(numVertices);
 
 	// 各頂点ごとにデルタを計算
@@ -108,7 +108,8 @@ void DeltaMushBindMeshData::ComputeDelta(const std::vector<MPoint>& src, const s
 		// 隣接頂点ごとの delta を保持する配列を初期化
 		const uint32_t startIdx = m_startIndexNeighbourIndices[vertIdx];
 		const uint32_t numNeighbour = m_startIndexNeighbourIndices[vertIdx + 1] - startIdx;
-		m_delta[vertIdx].resize(numNeighbour - 1);
+
+		const uint32_t startIdxDelta = startIdx - vertIdx;
 
 		// compute tangent matrix and delta in the tangent space
 		for (uint32_t neighborIdx = 0; neighborIdx < numNeighbour - 1; neighborIdx++)
@@ -120,9 +121,9 @@ void DeltaMushBindMeshData::ComputeDelta(const std::vector<MPoint>& src, const s
 
 			// 頂点の tangent space coordinate でデルタを保持する
 			auto deltaTangentSpace = delta * mat.inverse();
-			m_delta[vertIdx][neighborIdx][0] = deltaTangentSpace.x;
-			m_delta[vertIdx][neighborIdx][1] = deltaTangentSpace.y;
-			m_delta[vertIdx][neighborIdx][2] = deltaTangentSpace.z;
+			m_delta[startIdxDelta + neighborIdx][0] = deltaTangentSpace.x;
+			m_delta[startIdxDelta + neighborIdx][1] = deltaTangentSpace.y;
+			m_delta[startIdxDelta + neighborIdx][2] = deltaTangentSpace.z;
 		}
 	}
 }

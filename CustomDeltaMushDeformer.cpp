@@ -117,6 +117,9 @@ void CustomDeltaMushDeformer::ApplyDeltaMush(const std::vector<MPoint>& skinned,
 		// looping the neighbours
 		const uint32_t startIdx = startIndices[vertIdx];
 		const uint32_t neighbourNum = startIndices[vertIdx + 1] - startIdx;
+
+		const uint32_t startIdxDelta = startIdx - vertIdx;
+
 		for (uint32_t neighborIdx = 0; neighborIdx < neighbourNum - 1; neighborIdx++)
 		{
 			MMatrix mat = DMUtil::ComputeTangentMatrix(
@@ -124,7 +127,7 @@ void CustomDeltaMushDeformer::ApplyDeltaMush(const std::vector<MPoint>& skinned,
 				mushed[neighbourIndices[startIdx + neighborIdx]],
 				mushed[neighbourIndices[startIdx + neighborIdx + 1]]);
 
-			delta += MVector(deltaAll[vertIdx][neighborIdx].data()) * mat;
+			delta += MVector(deltaAll[startIdxDelta + neighborIdx].data()) * mat;
 		}
 		delta /= static_cast<double>(neighbourNum);
 
