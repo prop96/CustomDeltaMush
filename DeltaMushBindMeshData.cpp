@@ -36,9 +36,9 @@ void DeltaMushBindMeshData::SetBindMeshData(MObject& mesh)
 		// 隣接頂点インデックスを取得
 		MIntArray neighborIndices;
 		iter.getConnectedVertices(neighborIndices);
-		const uint32_t numNeighbour = neighborIndices.length();
 
 		// private field に格納
+		const uint32_t numNeighbour = neighborIndices.length();
 		for (uint32_t nIdx = 0; nIdx < numNeighbour; nIdx++)
 		{
 			m_neighbourIndices.push_back(neighborIndices[nIdx]);
@@ -64,8 +64,11 @@ void DeltaMushBindMeshData::SetBindMeshData(MObject& mesh)
 	ComputeDelta(posOriginal, posSmoothed);
 
 	m_isInitialized = true;
+}
 
-	//return stat;
+const std::vector<uint32_t>& DeltaMushBindMeshData::GetStartIndexNeighbourIndices() const
+{
+	return m_startIndexNeighbourIndices;
 }
 
 const std::vector<int32_t>& DeltaMushBindMeshData::GetNeighbourIndices() const
@@ -83,11 +86,6 @@ const std::vector<std::array<float, 3>>& DeltaMushBindMeshData::GetDelta() const
 	return m_delta;
 }
 
-const std::vector<uint32_t>& DeltaMushBindMeshData::GetStartIndexNeighbourIndices() const
-{
-	return m_startIndexNeighbourIndices;
-}
-
 bool DeltaMushBindMeshData::IsInitialized() const
 {
 	return m_isInitialized;
@@ -102,19 +100,18 @@ void DeltaMushBindMeshData::ComputeDelta(const std::vector<MPoint>& src, const s
 	// 各頂点ごとにデルタを計算
 	for (uint32_t vertIdx = 0; vertIdx < numVertices; vertIdx++)
 	{
+		// set delta length
 		const MVector delta = MVector(src[vertIdx] - smoothed[vertIdx]);
 		m_deltaLength[vertIdx] = delta.length();
 
-		// 隣接頂点ごとの delta を保持する配列を初期化
 		const uint32_t startIdx = m_startIndexNeighbourIndices[vertIdx];
-		const uint32_t numNeighbour = m_startIndexNeighbourIndices[vertIdx + 1] - startIdx;
-
 		const uint32_t startIdxDelta = startIdx - vertIdx;
 
 		// compute tangent matrix and delta in the tangent space
+		const uint32_t numNeighbour = m_startIndexNeighbourIndices[vertIdx + 1] - startIdx;
 		for (uint32_t neighborIdx = 0; neighborIdx < numNeighbour - 1; neighborIdx++)
 		{
-			MMatrix mat = DMUtil::ComputeTangentMatrix(
+			const MMatrix mat = DMUtil::ComputeTangentMatrix(
 				smoothed[vertIdx],
 				smoothed[m_neighbourIndices[startIdx + neighborIdx]],
 				smoothed[m_neighbourIndices[startIdx + neighborIdx + 1]]);

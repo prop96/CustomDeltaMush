@@ -8,11 +8,13 @@
 #include <cassert>
 #include <set>
 
+#define USE_MATRIX_LAPLACIAN_SMOOTHING 0
+
 namespace DMUtil
 {
 	MStatus SmoothMesh(MObject& mesh, const MPointArray& original, MPointArray& smoothed, int smoothItr, double smoothAmount)
 	{
-		const unsigned int numVerts = original.length();
+		const uint32_t numVerts = original.length();
 		CHECK_MSTATUS(smoothed.setLength(numVerts));
 
 		// compute the smoothing matrix
@@ -20,11 +22,11 @@ namespace DMUtil
 		bool isImplicit = false;
 		MeshLaplacian::ComputeSmoothingMatrix(std::move(MItMeshEdge(mesh)), numVerts, smoothAmount, smoothItr, isImplicit, B);
 
-		for (unsigned int idx = 0; idx < numVerts; idx++)
+		for (uint32_t idx = 0; idx < numVerts; idx++)
 		{
 			smoothed[idx] = MPoint(0, 0, 0, 0);
 
-			for (unsigned int k = 0; k < numVerts; k++)
+			for (uint32_t k = 0; k < numVerts; k++)
 			{
 				smoothed[idx] += B.coeff(k, idx) * original[k];
 			}
@@ -42,7 +44,7 @@ namespace DMUtil
 		const std::vector<uint32_t>& startIndices,
 		const std::vector<int32_t>& neighbourIndices)
 	{
-#if 0
+#if USE_MATRIX_LAPLACIAN_SMOOTHING
 		// verify Laplacian Smoothing
 		CHECK_MSTATUS(DMUtil::SmoothMesh(mesh, source, target, smoothItr, smoothAmount));
 		return;

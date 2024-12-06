@@ -114,19 +114,19 @@ void CustomDeltaMushDeformer::ApplyDeltaMush(const std::vector<MPoint>& skinned,
 		// compute delta in animated pose
 		MVector delta = MVector::zero;
 
-		// looping the neighbours
 		const uint32_t startIdx = startIndices[vertIdx];
-		const uint32_t neighbourNum = startIndices[vertIdx + 1] - startIdx;
-
 		const uint32_t startIdxDelta = startIdx - vertIdx;
 
+		// looping the neighbours
+		const uint32_t neighbourNum = startIndices[vertIdx + 1] - startIdx;
 		for (uint32_t neighborIdx = 0; neighborIdx < neighbourNum - 1; neighborIdx++)
 		{
-			MMatrix mat = DMUtil::ComputeTangentMatrix(
+			const MMatrix mat = DMUtil::ComputeTangentMatrix(
 				mushed[vertIdx],
 				mushed[neighbourIndices[startIdx + neighborIdx]],
 				mushed[neighbourIndices[startIdx + neighborIdx + 1]]);
 
+			// convert from tangent space to world space
 			delta += MVector(deltaAll[startIdxDelta + neighborIdx].data()) * mat;
 		}
 		delta /= static_cast<double>(neighbourNum);
