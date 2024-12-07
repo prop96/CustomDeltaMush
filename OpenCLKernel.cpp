@@ -80,3 +80,26 @@ MStatus OpenCLKernel::Run(const std::vector<cl_event>& inEvents, cl_event* outEv
 
 	return MStatus::kSuccess;
 }
+
+MStatus OpenCLKernel::Run(const MAutoCLEvent& inEvent, MAutoCLEvent& outEvent)
+{
+	cl_int err = clEnqueueNDRangeKernel(
+		MOpenCLInfo::getMayaDefaultOpenCLCommandQueue(),
+		m_kernel.get(),
+		1,
+		nullptr,
+		&m_globalWorkSize,
+		&m_localWorkSize,
+		inEvent.isNull() ? 0 : 1,
+		inEvent.getReadOnlyRef(),
+		outEvent.getReferenceForAssignment()
+	);
+
+	if (err != CL_SUCCESS)
+	{
+		MGlobal::displayError("Error: failed to call clEnqueueNDRangeKernel");
+		return MStatus::kFailure;
+	}
+
+	return MStatus::kSuccess;
+}

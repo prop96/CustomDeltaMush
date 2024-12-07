@@ -20,4 +20,5 @@ public:
 
 	cl_kernel Get() const;
 	MStatus Run(const std::vector<cl_event>& inEvents, cl_event* outEvent);
+	MStatus Run(const MAutoCLEvent& inEvent, MAutoCLEvent& outEvent);
 };

@@ -8,7 +8,6 @@
 #include <clew/clew.h>
 #include <cassert>
 
-constexpr int MAX_NEIGH = 4;
 
 
 MGPUDeformerRegistrationInfo* CustomDeltaMushGPUDeformer::getGPUDeformerInfo()
@@ -36,6 +35,7 @@ bool CustomDeltaMushGPUDeformer::validateNodeValues(MDataBlock& block, const MEv
 
 void CustomDeltaMushGPUDeformer::terminate()
 {
+	m_startNeighbourIndicesBuffer.reset();
 	m_neighbourIndicesBuffer.reset();
 	m_originalDeltaBuffer.reset();
 	m_deltaLengthBuffer.reset();
@@ -100,7 +100,7 @@ MPxGPUDeformer::DeformerStatus CustomDeltaMushGPUDeformer::evaluate(
 	}
 
 	// initialize data for the mesh to bind if still not
-	if (!m_bindMeshData.IsInitialized())
+	if (!m_bindMeshData.IsInitialized() || evaluationNode.dirtyPlugExists(origGeom))
 	{
 		// bind the original mesh
 		MObject origGeomVal = block.inputArrayValue(origGeom, &returnStat).inputValue().asMesh();
@@ -111,7 +111,6 @@ MPxGPUDeformer::DeformerStatus CustomDeltaMushGPUDeformer::evaluate(
 
 	// Getting needed data
 	const double applyDeltaVal = block.inputValue(CustomDeltaMushDeformer::applyDelta).asDouble();
-
 
 	// # of vertices?
 	const uint32_t numElements = inputPositions.elementCount();
@@ -132,75 +131,62 @@ MPxGPUDeformer::DeformerStatus CustomDeltaMushGPUDeformer::evaluate(
 		m_applyDeltaKernel.Initialize(kernelFile, kernelName, numElements);
 	}
 
+	// create buffers and upload data
 	{
-		// init data builds the neighbour table and we are going to upload it
-		//MObject referenceMeshV = block.inputValue(CustomDeltaMushDeformer::outputGeom).data();
-
-		int size = numElements;
-		m_size = size;
-		m_neighbourIndices.resize(size * MAX_NEIGH);
-		m_originalDelta.resize(size * 3 * (MAX_NEIGH - 1));
-		m_deltaLength.resize(size);
-
-		// TODO: set up vectors here
-		//RebindData(referenceMeshV, iterationsVal, amountV);
-
-		// create buffers and upload data
 		cl_int clStatus;
 
+		m_startNeighbourIndicesBuffer.attach(clCreateBuffer(MOpenCLInfo::getOpenCLContext(), CL_MEM_COPY_HOST_PTR | CL_MEM_READ_ONLY,
+			m_bindMeshData.GetStartIndexNeighbourIndices().size() * sizeof(uint32_t), (void*)m_bindMeshData.GetStartIndexNeighbourIndices().data(), &clStatus));
+		MOpenCLInfo::checkCLErrorStatus(clStatus);
+
 		m_neighbourIndicesBuffer.attach(clCreateBuffer(MOpenCLInfo::getOpenCLContext(), CL_MEM_COPY_HOST_PTR | CL_MEM_READ_ONLY,
-			m_neighbourIndices.size() * sizeof(uint32_t), m_neighbourIndices.data(), &clStatus));
+			m_bindMeshData.GetNeighbourIndices().size() * sizeof(int32_t), (void*)m_bindMeshData.GetNeighbourIndices().data(), &clStatus));
 		MOpenCLInfo::checkCLErrorStatus(clStatus);
 
 		m_tmpBuffer0 = clCreateBuffer(MOpenCLInfo::getOpenCLContext(), CL_MEM_READ_ONLY,
-			3 * size * sizeof(float), nullptr, &clStatus);
+			3 * numElements * sizeof(float), nullptr, &clStatus);
 		MOpenCLInfo::checkCLErrorStatus(clStatus);
 
 		m_tmpBuffer1 = clCreateBuffer(MOpenCLInfo::getOpenCLContext(), CL_MEM_READ_ONLY,
-			3 * size * sizeof(float), nullptr, &clStatus);
+			3 * numElements * sizeof(float), nullptr, &clStatus);
 		MOpenCLInfo::checkCLErrorStatus(clStatus);
 
 		m_originalDeltaBuffer.attach(clCreateBuffer(MOpenCLInfo::getOpenCLContext(), CL_MEM_COPY_HOST_PTR | CL_MEM_READ_ONLY,
-			m_originalDelta.size() * sizeof(float), m_originalDelta.data(), &clStatus));
+			m_bindMeshData.GetDelta().size() * sizeof(std::array<float, 3>), (void*)m_bindMeshData.GetDelta().data(), &clStatus));
 		MOpenCLInfo::checkCLErrorStatus(clStatus);
 
 		m_deltaLengthBuffer.attach(clCreateBuffer(MOpenCLInfo::getOpenCLContext(), CL_MEM_COPY_HOST_PTR | CL_MEM_READ_ONLY,
-			m_deltaLength.size() * sizeof(float), m_deltaLength.data(), &clStatus));
+			m_bindMeshData.GetDeltaLength().size() * sizeof(float), (void*)m_bindMeshData.GetDeltaLength().data(), &clStatus));
 		MOpenCLInfo::checkCLErrorStatus(clStatus);
 	}
 
-	// Set up our input events.  The input event could be NULL, in that case we need to pass
-	// slightly different parameters into clEnqueueNDRangeKernel.
-	std::vector<cl_event> events = { 0 };
-	cl_uint eventCount = 0;
-	if (inputPositions.bufferReadyEvent().get())
-	{
-		events[eventCount++] = inputPositions.bufferReadyEvent().get();
-	}
-
+	// smoothing process
 	void* src = (void*)&m_tmpBuffer0;
 	void* trg = (void*)inputPositions.buffer().getReadOnlyRef();
-
-	cl_event inEvent;
-	cl_event outEvent;
+	MAutoCLEvent inEvent, outEvent;
 	auto& smoothingData = m_bindMeshData.GetSmoothingData();
-	for (int idx = 0; idx <  smoothingData.Iter; idx++)
+	for (uint32_t smoothItr = 0; smoothItr <  smoothingData.Iter; smoothItr++)
 	{
-		// Swap src and trg
+		// Swap src and trg buffer
 		{
+			if (smoothItr == 1)
+			{
+				src = (void*)&m_tmpBuffer1;
+			}
+
 			void* tmpPtr = src;
 			src = trg;
 			trg = tmpPtr;
 		}
 
-		if (idx == 1)
-		{
-			trg = (void*)&m_tmpBuffer1;
-		}
+		// swap the input and output event
+		inEvent.swap(outEvent);
 
 		// Set all of our kernel parameters.
 		uint32_t parameterId = 0;
 		err = clSetKernelArg(m_smoothingKernel.Get(), parameterId++, sizeof(cl_mem), trg);
+		MOpenCLInfo::checkCLErrorStatus(err);
+		err = clSetKernelArg(m_smoothingKernel.Get(), parameterId++, sizeof(cl_mem), m_startNeighbourIndicesBuffer.getReadOnlyRef());
 		MOpenCLInfo::checkCLErrorStatus(err);
 		err = clSetKernelArg(m_smoothingKernel.Get(), parameterId++, sizeof(cl_mem), m_neighbourIndicesBuffer.getReadOnlyRef());
 		MOpenCLInfo::checkCLErrorStatus(err);
@@ -208,48 +194,46 @@ MPxGPUDeformer::DeformerStatus CustomDeltaMushGPUDeformer::evaluate(
 		MOpenCLInfo::checkCLErrorStatus(err);
 		err = clSetKernelArg(m_smoothingKernel.Get(), parameterId++, sizeof(cl_float), (void*)&smoothingData.Amount);
 		MOpenCLInfo::checkCLErrorStatus(err);
-		err = clSetKernelArg(m_smoothingKernel.Get(), parameterId++, sizeof(cl_uint), (void*)&idx);
-		MOpenCLInfo::checkCLErrorStatus(err);
 		err = clSetKernelArg(m_smoothingKernel.Get(), parameterId++, sizeof(cl_uint), (void*)&numElements);
 		MOpenCLInfo::checkCLErrorStatus(err);
 
 		// Run the Kernel
-		if (idx == 0)
+		if (smoothItr == 0)
 		{
-			err = m_smoothingKernel.Run(events, &outEvent);
-			inEvent = events[0];
+			err = m_smoothingKernel.Run(inputPositions.bufferReadyEvent(), outEvent);
 		}
 		else
 		{
-			err = m_smoothingKernel.Run({ inEvent }, &outEvent);
+			err = m_smoothingKernel.Run(inEvent, outEvent);
 		}
 		MOpenCLInfo::checkCLErrorStatus(err);
-
-		cl_event tmp = outEvent;
-		outEvent = inEvent;
-		inEvent = tmp;
 	}
 
-	uint32_t parameterId = 0;
-	err = clSetKernelArg(m_applyDeltaKernel.Get(), parameterId++, sizeof(cl_mem), outputPositions.buffer().getReadOnlyRef());
-	MOpenCLInfo::checkCLErrorStatus(err);
-	err = clSetKernelArg(m_applyDeltaKernel.Get(), parameterId++, sizeof(cl_mem), m_originalDeltaBuffer.getReadOnlyRef());
-	MOpenCLInfo::checkCLErrorStatus(err);
-	err = clSetKernelArg(m_applyDeltaKernel.Get(), parameterId++, sizeof(cl_mem), m_deltaLengthBuffer.getReadOnlyRef());
-	MOpenCLInfo::checkCLErrorStatus(err);
-	err = clSetKernelArg(m_applyDeltaKernel.Get(), parameterId++, sizeof(cl_mem), m_neighbourIndicesBuffer.getReadOnlyRef());
-	MOpenCLInfo::checkCLErrorStatus(err);
-	err = clSetKernelArg(m_applyDeltaKernel.Get(), parameterId++, sizeof(cl_mem), trg);
-	MOpenCLInfo::checkCLErrorStatus(err);
-	err = clSetKernelArg(m_applyDeltaKernel.Get(), parameterId++, sizeof(cl_uint), (void*)&numElements);
-	MOpenCLInfo::checkCLErrorStatus(err);
+	// adding delta process
+	{
+		uint32_t parameterId = 0;
+		err = clSetKernelArg(m_applyDeltaKernel.Get(), parameterId++, sizeof(cl_mem), outputPositions.buffer().getReadOnlyRef());
+		MOpenCLInfo::checkCLErrorStatus(err);
+		err = clSetKernelArg(m_smoothingKernel.Get(), parameterId++, sizeof(cl_mem), m_startNeighbourIndicesBuffer.getReadOnlyRef());
+		MOpenCLInfo::checkCLErrorStatus(err);
+		err = clSetKernelArg(m_applyDeltaKernel.Get(), parameterId++, sizeof(cl_mem), m_originalDeltaBuffer.getReadOnlyRef());
+		MOpenCLInfo::checkCLErrorStatus(err);
+		err = clSetKernelArg(m_applyDeltaKernel.Get(), parameterId++, sizeof(cl_mem), m_deltaLengthBuffer.getReadOnlyRef());
+		MOpenCLInfo::checkCLErrorStatus(err);
+		err = clSetKernelArg(m_applyDeltaKernel.Get(), parameterId++, sizeof(cl_mem), m_neighbourIndicesBuffer.getReadOnlyRef());
+		MOpenCLInfo::checkCLErrorStatus(err);
+		err = clSetKernelArg(m_applyDeltaKernel.Get(), parameterId++, sizeof(cl_mem), trg);
+		MOpenCLInfo::checkCLErrorStatus(err);
+		err = clSetKernelArg(m_applyDeltaKernel.Get(), parameterId++, sizeof(cl_uint), (void*)&numElements);
+		MOpenCLInfo::checkCLErrorStatus(err);
 
-	// Run the Kernel
-	MAutoCLEvent m_applyDeltaKernelFinishedEvent;
-	err = m_applyDeltaKernel.Run( {}, m_applyDeltaKernelFinishedEvent.getReferenceForAssignment());
+ 	    // Run the Kernel
+	 	MAutoCLEvent m_applyDeltaKernelFinishedEvent;
+		err = m_applyDeltaKernel.Run(outEvent, m_applyDeltaKernelFinishedEvent);
 
-	outputPositions.setBufferReadyEvent(m_applyDeltaKernelFinishedEvent);
-	MOpenCLInfo::checkCLErrorStatus(err);
+		outputPositions.setBufferReadyEvent(m_applyDeltaKernelFinishedEvent);
+		MOpenCLInfo::checkCLErrorStatus(err);
+	}
 
 	outputData.setBuffer(outputPositions);
 

@@ -37,10 +37,11 @@ private:
 
 	OpenCLKernel m_smoothingKernel;
 	OpenCLKernel m_applyDeltaKernel;
-	int32_t m_size = 0;
+
+	// start index of m_neighbourIndicesBuffer for each vertex
+	MAutoCLMem m_startNeighbourIndicesBuffer;
 
 	// neighboring vertex indices for Laplacian smoothing
-	std::vector<int32_t> m_neighbourIndices;
 	MAutoCLMem m_neighbourIndicesBuffer;
 
 	// temporary buffers for iterative smoothing
@@ -48,11 +49,9 @@ private:
 	cl_mem m_tmpBuffer1 = nullptr;
 
 	// delta computed for the bound mesh
-	std::vector<float> m_originalDelta;
 	MAutoCLMem m_originalDeltaBuffer;
 
 	// delta length computed for the bound mesh
-	std::vector<float> m_deltaLength;
 	MAutoCLMem m_deltaLengthBuffer;
 };
 
